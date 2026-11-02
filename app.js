@@ -135,7 +135,15 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function
 function svg(key, size, sw) {
   if (typeof key === 'string' && key.indexOf('ti-') === 0) return '<i class="ti ' + key.replace(/[^a-z0-9-]/g, '') + '" style="font-size:' + (size || 20) + 'px;line-height:1;font-style:normal" aria-hidden="true"></i>';
   var p = ICONS[key] || key; return '<svg width="' + (size || 20) + '" height="' + (size || 20) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' + (sw || 1.8) + '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + '</svg>'; }
-function C(k) { return COLORS[k] || COLORS.gris; }
+function isDark() { return document.documentElement.getAttribute('data-theme') === 'dark'; }
+function hexRGB(h) { h = h.replace('#', ''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; }
+function hexA(h, a) { var c = hexRGB(h); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
+function mixHex(h, w, t) { var a = hexRGB(h), b = hexRGB(w); return '#' + a.map(function (v, i) { return ('0' + Math.round(v + (b[i] - v) * t).toString(16)).slice(-2); }).join(''); }
+function C(k) {
+  var c = COLORS[k] || COLORS.gris;
+  if (!isDark()) return c;
+  return {soft: hexA(c.dot, .2), ink: mixHex(c.dot, '#ffffff', .35), dot: c.dot};
+}
 function tile(iconKey, colorKey, size, r) { var c = C(colorKey); return '<span class="ico" style="background:' + c.soft + ';color:' + c.ink + (size ? ';width:' + size + 'px;height:' + size + 'px' : '') + (r ? ';border-radius:' + r + 'px' : '') + '">' + svg(iconKey, size ? Math.round(size / 2) : 16, 2) + '</span>'; }
 function cat(id) { if (id === 'ingreso') return INCOME; if (id === 'transfer') return TRANSFER; return S.cats.filter(function (c) { return c.id === id; })[0] || {id:id, name:'Sin categoría', color:'gris', icon:'dots', limit:0}; }
 function acc(id) { return S.accounts.filter(function (a) { return a.id === id; })[0] || {id:id, name:'Cuenta eliminada', type:'efectivo', color:'gris', icon:'cash', initial:0}; }
@@ -333,9 +341,9 @@ var VIEWS = [
   {id:'movimientos', name:'Movimientos', icon:P.list},
   {id:'estadisticas', name:'Estadísticas', icon:P.chart},
   {id:'billetera', name:'Mi billetera', short:'Billetera', icon:'wallet'},
-  {id:'personalizar', name:'Personalizar', icon:P.gear}
+  {id:'personalizar', name:'Configuración', icon:P.gear}
 ];
-var ALIAS = {cuentas:'billetera', reportes:'estadisticas', metas:'presupuesto'};
+var ALIAS = {cuentas:'billetera', reportes:'estadisticas', metas:'presupuesto', configuracion:'personalizar'};
 function current() { var h = (location.hash || '').slice(1); h = ALIAS[h] || h; return VIEWS.some(function (v) { return v.id === h; }) ? h : 'inicio'; }
 
 function renderNav() {
@@ -404,9 +412,9 @@ function viewInicio() {
   return '<div class="top"><div><div class="sub">' + hello + '</div><h1>' + monthTitle(viewMonth) + '</h1></div><div style="display:flex;gap:8px"><a class="btn btn-ghost iconbtn-round only-m" href="#personalizar" aria-label="Personalizar">' + svg(P.gear, 20) + '</a><button class="btn btn-dark hide-m" data-open-add>' + svg(P.plus, 18, 2.2) + 'Agregar</button></div></div>' +
   '<div class="grid">' +
     '<div class="c7" style="display:flex;flex-direction:column;gap:16px">' +
-      '<div class="balance"><div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tu dinero</span><span class="big">' + (s.cash < 0 ? '−' : '') + money(s.cash) + '</span>' + (s.debt > 0 ? '<span class="lbl">Deuda en tarjetas: <b style="color:#FFB4A3">' + money(s.debt) + '</b></span>' : '') + '</div>' +
+      '<div class="balance"><div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tu dinero</span><span class="big">' + (s.cash < 0 ? '−' : '') + money(s.cash) + '</span>' + (s.debt > 0 ? '<span class="lbl">Deuda en tarjetas: <b style="color:var(--debt)">' + money(s.debt) + '</b></span>' : '') + '</div>' +
       '<div class="duo"><div><span class="lbl" style="font-size:12px">Ingresos del mes</span><b style="color:var(--mint);font-size:15px">+' + money(s.inc) + '</b></div><div><span class="lbl" style="font-size:12px">Gastos del mes</span><b style="font-size:15px">−' + money(s.exp) + '</b></div></div></div>' +
-      '<div><div class="row-between" style="margin-bottom:10px"><b style="font-size:15px">Mis cuentas</b><a class="link" href="#billetera">Gestionar</a></div><div class="accounts">' + S.accounts.map(function (a) { return accTile(a, s.bal[a.id]); }).join('') + '<button class="acc addcard" style="min-height:0;border-radius:18px" data-open-acc>' + svg(P.plus, 20, 2) + '<span style="font-size:13px">Agregar</span></button></div></div>' +
+      '<div><div class="row-between" style="margin-bottom:10px"><b style="font-size:15px">Mis cuentas</b><a class="link" href="#billetera">Gestionar</a></div><div class="accounts">' + S.accounts.map(function (a) { return accTile(a, s.bal[a.id]); }).join('') + '</div></div>' +
       budgetBlock(s) +
     '</div>' +
     '<div class="c5" style="display:flex;flex-direction:column;gap:16px">' + upcomingCard() + (recent.length
@@ -441,9 +449,9 @@ function viewCuentas() {
     return '<div class="acccard"><div class="head">' + tile(accIcon(a), a.color, 40, 13) + '<div style="flex:1;min-width:0;display:flex;flex-direction:column"><b style="font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(a.name) + '</b><span class="typetag">' + (TYPES[a.type] || TYPES.efectivo).name + '</span></div>' +
       '<button class="del" data-edit-acc="' + esc(a.id) + '" aria-label="Editar ' + esc(a.name) + '">' + svg(P.edit, 18) + '</button></div>' + body + '</div>';
   }).join('');
-  return '<div class="top"><div><div class="sub">Tus cuentas, tarjetas y ahorros</div><h1>Mi billetera</h1></div><button class="btn btn-dark" data-open-acc>' + svg(P.plus, 18, 2.2) + 'Agregar cuenta</button></div>' +
+  return '<div class="top"><div><div class="sub">Tus cuentas, tarjetas y ahorros</div><h1>Mi billetera</h1></div>' + '<a class="btn btn-ghost btn-sm" href="#personalizar">' + svg(P.gear, 16, 2) + 'Configurar</a>' + '</div>' +
     '<div class="metrics"><div class="metric"><span class="sub" style="font-size:13px">Patrimonio neto</span><b>' + (s.net < 0 ? '−' : '') + money(s.net) + '</b></div><div class="metric"><span class="sub" style="font-size:13px">Tu dinero</span><b style="font-size:18px">' + money(s.cash) + '</b></div><div class="metric"><span class="sub" style="font-size:13px">Deuda en tarjetas</span><b style="font-size:18px;color:' + (s.debt > 0 ? 'var(--red)' : 'inherit') + '">' + money(s.debt) + '</b></div></div>' +
-    '<div class="accgrid">' + cards + '<button class="addcard" data-open-acc>' + svg(P.plus, 24, 2) + 'Agregar cuenta<span class="sub" style="font-weight:500;font-size:13px">Banco, ahorros, billetera o tarjeta</span></button></div>' + goalsCard();
+    '<div class="accgrid">' + cards + '</div>' + goalsCard();
 }
 
 function filterCount() { return (fKind !== 'todos' ? 1 : 0) + fAccs.length + fCats.length; }
@@ -495,12 +503,12 @@ function viewPresupuesto() {
   var hero;
   if (!s.limit) hero = emptyBox(P.target, 'Todavía no tienes límites', 'Ponle un presupuesto mensual a tus categorías (por ejemplo, Comida S/ 700) y aquí verás cuánto te queda cada día.', '<a class="btn btn-primary" href="#personalizar" style="margin-top:6px">Poner límites</a>');
   else hero = '<div class="balance" style="flex-direction:row;align-items:center;gap:20px">' +
-      '<div class="donut" style="width:110px;height:110px;background:conic-gradient(var(--mint) 0 ' + Math.min(pct, 100) + '%, #2C3038 ' + Math.min(pct, 100) + '% 100%)"><div style="width:84px;height:84px;background:var(--dark)"><b style="font-size:22px">' + pct + '%</b><span class="lbl" style="font-size:11px">usado</span></div></div>' +
-      '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">' + (left >= 0 ? 'Te quedan para ' + mname : 'Te pasaste en ' + mname) + '</span><span class="big" style="font-size:30px">' + money(left) + '</span><span style="font-size:13px;color:#E0E3E8">' + (s.isCur ? (left > 0 ? 'Puedes gastar ' + money(perDay) + ' por día durante ' + plural(s.daysLeft, 'día', 'días') : 'Revisa tus categorías en rojo') : 'Presupuesto de ' + money(s.limit) + ' en total') + '</span></div></div>';
-  return '<div class="top"><div><div class="sub">Límites del mes y pagos fijos</div><h1>Presupuesto</h1></div>' + monthNav() + '</div>' +
+      '<div class="donut" style="width:110px;height:110px;background:conic-gradient(var(--mint) 0 ' + Math.min(pct, 100) + '%, var(--ring) ' + Math.min(pct, 100) + '% 100%)"><div style="width:84px;height:84px;background:var(--dark)"><b style="font-size:22px">' + pct + '%</b><span class="lbl" style="font-size:11px">usado</span></div></div>' +
+      '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">' + (left >= 0 ? 'Te quedan para ' + mname : 'Te pasaste en ' + mname) + '</span><span class="big" style="font-size:30px">' + money(left) + '</span><span style="font-size:13px;color:var(--on-dark-muted)">' + (s.isCur ? (left > 0 ? 'Puedes gastar ' + money(perDay) + ' por día durante ' + plural(s.daysLeft, 'día', 'días') : 'Revisa tus categorías en rojo') : 'Presupuesto de ' + money(s.limit) + ' en total') + '</span></div></div>';
+  return '<div class="top"><div><div class="sub">Límites del mes y pagos fijos</div><h1>Presupuesto</h1></div><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' + monthNav() + '<a class="btn btn-ghost btn-sm" href="#personalizar">' + svg(P.gear, 16, 2) + 'Configurar</a>' + '</div></div>' +
   '<div class="grid">' +
     '<div class="c5">' + hero + '</div>' +
-    '<div class="c7"><div class="card"><div class="row-between" style="align-items:center;margin-bottom:6px"><h2 style="margin:0">Por categoría</h2><div style="display:flex;gap:12px;align-items:center"><a class="link" href="#personalizar">Editar límites</a><button class="btn btn-dark btn-sm" data-open-cat>' + svg(P.plus, 16, 2.2) + 'Categoría</button></div></div>' +
+    '<div class="c7"><div class="card"><div class="row-between" style="align-items:center;margin-bottom:6px"><h2 style="margin:0">Por categoría</h2><div style="display:flex;gap:12px;align-items:center"><a class="link" href="#personalizar">Editar límites</a></div></div>' +
     S.cats.map(function (c) {
       var sp = s.byCat[c.id] || 0, cc = C(c.color);
       if (!c.limit) return '<div class="goal"><div style="display:flex;align-items:center;gap:10px">' + tile(c.icon, c.color, 28, 9) + '<b style="flex:1;font-size:14px">' + esc(c.name) + '</b><span class="sub" style="font-size:13px">' + money(sp) + ' · sin límite</span></div></div>';
@@ -517,7 +525,7 @@ function viewEstadisticas() {
   var s = stats(viewMonth), a0 = 0;
   var mtx = S.tx.filter(function (t) { return t.date && t.date.slice(0, 7) === viewMonth && t.cat !== 'transfer'; });
   var exps = mtx.filter(function (t) { return t.amount < 0; });
-  var stops = s.exp ? S.cats.map(function (c) { var p = (s.byCat[c.id] || 0) / s.exp * 100; var a = a0; a0 += p; return C(c.color).dot + ' ' + a.toFixed(2) + '% ' + a0.toFixed(2) + '%'; }).join(',') : '#ECEAE3 0 100%';
+  var stops = s.exp ? S.cats.map(function (c) { var p = (s.byCat[c.id] || 0) / s.exp * 100; var a = a0; a0 += p; return C(c.color).dot + ' ' + a.toFixed(2) + '% ' + a0.toFixed(2) + '%'; }).join(',') : 'var(--empty) 0 100%';
   var saved = s.inc - s.exp, rate = s.inc ? Math.round(saved / s.inc * 100) : null;
   var avg = s.exp / Math.max(s.daysElapsed, 1);
   var head = '<div class="top"><div><div class="sub">Cómo se mueve tu plata</div><h1>Estadísticas</h1></div>' + monthNav() + '</div>';
@@ -547,7 +555,7 @@ function viewEstadisticas() {
   var trend = '<div class="card"><div class="row-between"><h2>Ingresos y gastos</h2><span class="sub" style="font-size:12px">Últimos 6 meses</span></div>' +
     '<div class="pairs">' + six.map(function (x) {
       var on = x.m === viewMonth;
-      return '<div><div class="pb"><span style="height:' + Math.max(Math.round(x.inc / max6 * 130), 3) + 'px;background:' + (on ? 'var(--green)' : 'var(--mint)') + '" title="Ingresos ' + money(x.inc) + '"></span><span style="height:' + Math.max(Math.round(x.exp / max6 * 130), 3) + 'px;background:' + (on ? 'var(--ink)' : '#C9C5BA') + '" title="Gastos ' + money(x.exp) + '"></span></div><span class="sub" style="font-size:12px;font-weight:' + (on ? 700 : 500) + '">' + monthShort(x.m) + '</span></div>';
+      return '<div><div class="pb"><span style="height:' + Math.max(Math.round(x.inc / max6 * 130), 3) + 'px;background:' + (on ? 'var(--green)' : 'var(--mint)') + '" title="Ingresos ' + money(x.inc) + '"></span><span style="height:' + Math.max(Math.round(x.exp / max6 * 130), 3) + 'px;background:' + (on ? 'var(--ink)' : 'var(--track)') + '" title="Gastos ' + money(x.exp) + '"></span></div><span class="sub" style="font-size:12px;font-weight:' + (on ? 700 : 500) + '">' + monthShort(x.m) + '</span></div>';
     }).join('') + '</div>' +
     '<div class="chips" style="margin-top:12px;gap:14px;font-size:12px;color:var(--muted)"><span style="display:flex;align-items:center;gap:6px"><i style="width:10px;height:10px;border-radius:3px;background:var(--green)"></i>Ingresos</span><span style="display:flex;align-items:center;gap:6px"><i style="width:10px;height:10px;border-radius:3px;background:var(--ink)"></i>Gastos</span></div></div>';
 
@@ -567,7 +575,7 @@ function viewEstadisticas() {
   var wmax = Math.max.apply(null, wd) || 1, wTop = wd.indexOf(Math.max.apply(null, wd));
   var WD = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'], WDL = ['los lunes', 'los martes', 'los miércoles', 'los jueves', 'los viernes', 'los sábados', 'los domingos'];
   var weekCard = '<div class="card"><div class="row-between"><h2>Por día de la semana</h2>' + (s.exp ? '<span class="sub" style="font-size:12px">Gastas más ' + WDL[wTop] + '</span>' : '') + '</div><div class="week">' +
-    wd.map(function (v, i) { return '<div><span class="sub" style="font-size:11px">' + (v ? Math.round(v).toLocaleString('en-US') : '') + '</span><span class="b" style="height:' + Math.max(Math.round(v / wmax * 110), 3) + 'px;background:' + (i === wTop && v ? 'var(--green)' : '#D9D5CB') + '"></span><span class="sub" style="font-size:12px;font-weight:600">' + WD[i] + '</span></div>'; }).join('') + '</div></div>';
+    wd.map(function (v, i) { return '<div><span class="sub" style="font-size:11px">' + (v ? Math.round(v).toLocaleString('en-US') : '') + '</span><span class="b" style="height:' + Math.max(Math.round(v / wmax * 110), 3) + 'px;background:' + (i === wTop && v ? 'var(--green)' : 'var(--track)') + '"></span><span class="sub" style="font-size:12px;font-weight:600">' + WD[i] + '</span></div>'; }).join('') + '</div></div>';
 
   // Datos curiosos
   var biggest = exps.slice().sort(function (a, b) { return a.amount - b.amount; })[0];
@@ -592,8 +600,8 @@ function goalsCard() {
     var p = g.target ? Math.min(Math.round((g.saved || 0) / g.target * 100), 100) : 0, done = (g.saved || 0) >= g.target;
     return '<div class="goal"><div style="display:flex;align-items:center;gap:10px">' + tile(g.icon || 'star', g.color || 'verde', 36, 12) + '<b style="flex:1;font-size:15px">' + esc(g.name) + '</b>' + (done ? '<span class="tag">' + svg(P.check, 14, 2.4) + 'Lograda</span>' : '<b style="color:var(--green);font-size:13px">' + p + '%</b>') + '<button class="del" data-edit-goal="' + esc(g.id) + '" aria-label="Editar ' + esc(g.name) + '">' + svg(P.edit, 18) + '</button></div>' +
       '<div class="bar" style="height:8px"><div style="width:' + p + '%;background:' + C(g.color || 'verde').dot + '"></div></div><div class="row-between sub" style="font-size:12px"><span>' + money(g.saved || 0) + ' de ' + money(g.target) + '</span><span>' + (done ? '¡Felicidades!' : 'Faltan ' + money(g.target - (g.saved || 0))) + '</span></div></div>';
-  }).join('') : '<p class="sub" style="margin:0 0 4px">Crea una meta (un viaje, una laptop, tu fondo de emergencia) y ve sumando tus aportes.</p>';
-  return '<div class="card"><div class="row-between"><h2>Metas de ahorro</h2><button class="btn btn-dark btn-sm" data-open-goal>' + svg(P.plus, 16, 2.2) + 'Nueva meta</button></div>' + goals + '</div>';
+  }).join('') : '<p class="sub" style="margin:0 0 4px">Crea metas de ahorro (un viaje, una laptop, tu fondo de emergencia) en <a class="link" href="#personalizar">Configuración</a> y ve sumando tus aportes.</p>';
+  return '<div class="card"><h2>Metas de ahorro</h2>' + goals + '</div>';
 }
 
 /* ---------- Pagos fijos: repeticiones ---------- */
@@ -698,8 +706,8 @@ function cardPayRows() {
 function billsCard() {
   var pend = pendingItems(), monthly = S.bills.reduce(function (x, b) { return x + monthlyEquiv(b); }, 0);
   var cards = cardPayRows();
-  var head = '<div class="row-between" style="align-items:center"><h2 style="margin:0">Pagos fijos</h2><button class="btn btn-dark btn-sm" data-open-bill>' + svg(P.plus, 16, 2.2) + 'Nuevo pago</button></div>';
-  if (!S.bills.length) return '<div class="card">' + head + '<p class="sub" style="margin:10px 0 0">Anota lo que pagas seguido: cada lunes, el 5 de cada mes, una vez al año o en una fecha exacta. Cuando llegue el día te aparece para registrarlo con un toque, o se registra solo si lo pones en automático.</p>' + cards.join('') + '</div>';
+  var head = '<h2 style="margin:0">Pagos fijos</h2>';
+  if (!S.bills.length) return '<div class="card">' + head + '<p class="sub" style="margin:10px 0 0">Anota lo que pagas seguido: cada lunes, el 5 de cada mes, una vez al año o en una fecha exacta. Agrégalos en <a class="link" href="#personalizar">Configuración</a>; cuando llegue el día te aparecen aquí para registrarlos con un toque, o se registran solos si los pones en automático.</p>' + cards.join('') + '</div>';
   return '<div class="card">' + head +
     '<p class="sub" style="margin:8px 0 4px;font-size:13px">Más o menos ' + money(monthly) + ' al mes</p>' +
     (pend.length ? '<div class="lab" style="margin:12px 0 0">Por registrar esta semana</div>' + pend.map(pendingRow).join('') : '') +
@@ -707,7 +715,7 @@ function billsCard() {
     (cards.length ? '<div class="lab" style="margin:14px 0 0">Tarjetas</div>' + cards.join('') : '') + '</div>';
 }
 function upcomingCard() {
-  if (!S.bills.length) return '<div class="card"><div class="row-between" style="align-items:center"><h2 style="margin:0">Pagos fijos</h2><button class="btn btn-ghost btn-sm" data-open-bill>' + svg(P.plus, 16, 2.2) + 'Agregar</button></div><p class="sub" style="margin:10px 0 0;font-size:13px">Anota lo que pagas seguido (cada lunes, el 5 de cada mes…) y aquí te aparece cuando toque pagarlo.</p></div>';
+  if (!S.bills.length) return '<div class="card"><h2 style="margin:0">Pagos fijos</h2><p class="sub" style="margin:10px 0 0;font-size:13px">Anota lo que pagas seguido (cada lunes, el 5 de cada mes…) en <a class="link" href="#personalizar">Configuración</a> y aquí te aparece cuando toque pagarlo.</p></div>';
   var pend = pendingItems();
   if (!pend.length) return '<div class="card"><div class="row-between"><h2 style="margin:0">Pagos fijos</h2><a class="link" href="#presupuesto">Ver todos</a></div><p class="sub" style="margin:10px 0 0;font-size:13px">No tienes pagos por registrar esta semana.</p></div>';
   var sum = pend.reduce(function (x, it) { return x + it.b.amount; }, 0);
@@ -737,36 +745,64 @@ function runAuto() {
 
 function viewPersonalizar() {
   var used = {}; S.tx.forEach(function (t) { used[t.cat] = (used[t.cat] || 0) + 1; });
-  var u = S.user || {};
+  var u = S.user || {}, bal = balances();
   var standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
   var ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   var install = standalone ? '<p class="sub" style="margin:0;font-size:13px">Ya estás usando la app instalada.</p>'
     : installEvt ? '<button class="btn btn-primary btn-sm" data-install>' + svg(P.download, 16, 2) + 'Instalar My Wallet</button>'
     : ios ? '<p class="sub" style="margin:0;font-size:13px">En iPhone: toca Compartir y luego "Agregar a pantalla de inicio".</p>'
     : '<p class="sub" style="margin:0;font-size:13px">Abre el menú del navegador (⋮) y elige "Instalar app" o "Agregar a la pantalla de inicio".</p>';
-  return '<div class="top"><div><div class="sub">Haz que la app sea tuya</div><h1>Personalizar</h1></div></div>' +
+  var theme = S.settings.theme || 'auto';
+  function section(title, btnAttr, btnText, rows, empty) {
+    return '<div class="card"><div class="row-between" style="align-items:center;margin-bottom:4px"><h2 style="margin:0">' + title + '</h2><button class="btn btn-dark btn-sm" ' + btnAttr + '>' + svg(P.plus, 16, 2.2) + btnText + '</button></div>' + (rows || '<p class="sub" style="margin:10px 0 0;font-size:13px">' + empty + '</p>') + '</div>';
+  }
+  function editBtn(attr, id, name) { return '<button class="del" ' + attr + '="' + esc(id) + '" aria-label="Editar ' + esc(name) + '">' + svg(P.edit, 18) + '</button>'; }
+  var accRows = S.accounts.map(function (a) {
+    var info = isCredit(a) ? 'Disponible ' + money(Math.max((a.limit || 0) - Math.max(-bal[a.id], 0), 0)) + ' de ' + money(a.limit || 0) : (bal[a.id] < 0 ? '−' : '') + money(bal[a.id]);
+    return '<div class="setrow">' + tile(accIcon(a), a.color, 40, 13) + '<div class="t"><b>' + esc(a.name) + '</b><span>' + (TYPES[a.type] || TYPES.efectivo).name + ' · ' + info + '</span></div>' + editBtn('data-edit-acc', a.id, a.name) + '</div>';
+  }).join('');
+  var catRows = S.cats.map(function (c) { var n = used[c.id] || 0; return '<div class="setrow">' + tile(c.icon, c.color, 40, 13) + '<div class="t"><b>' + esc(c.name) + '</b><span>' + (c.limit ? 'Límite ' + money(c.limit) + ' al mes' : 'Sin límite') + ' · ' + plural(n, 'movimiento', 'movimientos') + '</span></div>' + editBtn('data-edit-cat', c.id, c.name) + '</div>'; }).join('');
+  var billRows = S.bills.map(billRow).join('');
+  var goalRows = S.goals.map(function (g) { return '<div class="setrow">' + tile(g.icon || 'star', g.color || 'verde', 40, 13) + '<div class="t"><b>' + esc(g.name) + '</b><span>' + money(g.saved || 0) + ' de ' + money(g.target) + '</span></div>' + editBtn('data-edit-goal', g.id, g.name) + '</div>'; }).join('');
+  return '<div class="top"><div><div class="sub">Agrega y personaliza todo desde aquí</div><h1>Configuración</h1></div></div>' +
   '<div class="grid">' +
+    '<div class="c7" style="display:flex;flex-direction:column;gap:16px">' +
+      section('Cuentas y tarjetas', 'data-open-acc', 'Nueva cuenta', accRows, 'Agrega tu efectivo, Yape, cuentas de banco, ahorros y tarjetas de crédito.') +
+      section('Categorías y límites', 'data-open-cat', 'Nueva categoría', catRows, 'Crea categorías para ordenar tus gastos.') +
+      section('Pagos fijos', 'data-open-bill', 'Nuevo pago', billRows, 'Lo que pagas seguido: cada lunes, el 5 de cada mes, cada año o en una fecha exacta.') +
+      section('Metas de ahorro', 'data-open-goal', 'Nueva meta', goalRows, 'Un viaje, una laptop, tu fondo de emergencia…') +
+    '</div>' +
     '<div class="c5" style="display:flex;flex-direction:column;gap:16px">' +
+      '<div class="card"><h2>Apariencia</h2><span class="lab">Tema</span><div class="seg" style="margin-bottom:16px">' +
+        [['light','Claro'],['dark','Oscuro'],['auto','Automático']].map(function (o) { return '<button data-theme="' + o[0] + '" aria-pressed="' + (theme === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>' +
+        '<span class="lab">Color de la app</span><div class="swatches">' + Object.keys(ACCENTS).map(function (k) { return '<button class="swatch" data-accent="' + k + '" aria-label="Color ' + k + '" aria-pressed="' + (S.settings.accent === k) + '" style="background:' + ACCENTS[k].main + ';width:44px;height:44px;border-radius:22px"></button>'; }).join('') + '</div>' +
+        '<p class="hint">Automático usa el modo del celular (claro de día u oscuro si lo tienes activado).</p></div>' +
+      '<div class="card"><h2>Moneda</h2><div class="chips">' + CURRENCIES.map(function (c) { return '<button class="chip" data-currency="' + esc(c) + '" aria-pressed="' + (S.settings.currency === c) + '">' + esc(c) + '</button>'; }).join('') + '</div><p class="hint">Solo cambia el símbolo que se muestra, no convierte montos.</p></div>' +
       '<div class="card"><h2>Tu cuenta</h2><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' + avatar(u) + '<div style="min-width:0;display:flex;flex-direction:column"><b style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.displayName || '') + '</b><span class="sub" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.email || '') + '</span></div></div>' +
         '<label class="lab" for="sName">Cómo te saludamos</label><input class="field" id="sName" maxlength="20" value="' + esc(S.settings.name || '') + '" placeholder="Tu nombre">' +
         '<button class="btn btn-ghost btn-sm" data-logout style="margin-top:14px">' + svg(P.logout, 16, 2) + 'Cerrar sesión</button></div>' +
       '<div class="card"><h2>Instalar en este dispositivo</h2>' + install + '</div>' +
-      '<div class="card"><h2>Color de la app</h2><div class="swatches">' + Object.keys(ACCENTS).map(function (k) { return '<button class="swatch" data-accent="' + k + '" aria-label="Color ' + k + '" aria-pressed="' + (S.settings.accent === k) + '" style="background:' + ACCENTS[k].main + ';width:44px;height:44px;border-radius:22px"></button>'; }).join('') + '</div></div>' +
-      '<div class="card"><h2>Moneda</h2><div class="chips">' + CURRENCIES.map(function (c) { return '<button class="chip" data-currency="' + esc(c) + '" aria-pressed="' + (S.settings.currency === c) + '">' + esc(c) + '</button>'; }).join('') + '</div><p class="hint">Solo cambia el símbolo que se muestra, no convierte montos.</p></div>' +
     '</div>' +
-    '<div class="c7"><div class="card"><div class="row-between"><h2>Categorías y límites</h2><button class="btn btn-dark btn-sm" data-open-cat>' + svg(P.plus, 16, 2.2) + 'Nueva</button></div>' +
-      S.cats.map(function (c) { var n = used[c.id] || 0; return '<div class="setrow">' + tile(c.icon, c.color, 40, 13) + '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><b style="font-size:14px">' + esc(c.name) + '</b><span class="sub" style="font-size:12px">' + (c.limit ? 'Límite ' + money(c.limit) + ' al mes' : 'Sin límite') + ' · ' + plural(n, 'movimiento', 'movimientos') + '</span></div><button class="del" data-edit-cat="' + esc(c.id) + '" aria-label="Editar ' + esc(c.name) + '">' + svg(P.edit, 18) + '</button></div>'; }).join('') +
-    '</div></div>' +
   '</div>';
 }
 
 /* ------------------------------------------------------------------ */
 /* Render                                                              */
 /* ------------------------------------------------------------------ */
+var darkMQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+function themePref() { if (S.user && S.settings.theme) return S.settings.theme; try { return localStorage.getItem('mw-theme') || 'auto'; } catch (e) { return 'auto'; } }
+function applyTheme() {
+  var t = themePref(), dark = t === 'dark' || (t === 'auto' && darkMQ && darkMQ.matches);
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  try { localStorage.setItem('mw-theme', t); } catch (e) {}
+}
+if (darkMQ && darkMQ.addEventListener) darkMQ.addEventListener('change', function () { applyAccent(); render(); });
 function applyAccent() {
+  applyTheme();
   var a = ACCENTS[S.settings.accent] || ACCENTS.verde, r = document.documentElement.style;
+  if (isDark()) { var m = mixHex(a.main, '#ffffff', .18); a = {main:m, soft:hexA(m, .22), ink:a.light, light:a.light}; }
   r.setProperty('--green', a.main); r.setProperty('--green-soft', a.soft); r.setProperty('--green-ink', a.ink); r.setProperty('--mint', a.light);
-  var meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute('content', a.main);
+  var meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute('content', isDark() ? '#0F1114' : a.main);
   document.querySelectorAll('.cur').forEach(function (el) { el.textContent = S.settings.currency; });
 }
 function render() {
@@ -866,10 +902,10 @@ function paintTx() {
   $('toBlock').style.display = F.type === 'transfer' ? '' : 'none';
   $('accLabel').textContent = F.type === 'transfer' ? 'Desde' : F.type === 'ingreso' ? 'Entra a' : 'Pagado con';
   if (!S.cats.some(function (c) { return c.id === F.cat; })) F.cat = S.cats.length ? S.cats[0].id : null;
-  $('catGrid').innerHTML = S.cats.map(function (c) { return '<button type="button" class="catbtn" data-cat="' + esc(c.id) + '" aria-pressed="' + (c.id === F.cat) + '">' + tile(c.icon, c.color, 28, 9) + '<span>' + esc(c.name) + '</span></button>'; }).join('') + '<button type="button" class="catbtn new" data-open-cat="fromtx">' + svg(P.plus, 16, 2) + '<span>Nueva</span></button>';
+  $('catGrid').innerHTML = S.cats.map(function (c) { return '<button type="button" class="catbtn" data-cat="' + esc(c.id) + '" aria-pressed="' + (c.id === F.cat) + '">' + tile(c.icon, c.color, 28, 9) + '<span>' + esc(c.name) + '</span></button>'; }).join('');
   var fromList = F.type === 'gasto' ? S.accounts : S.accounts.filter(function (a) { return !isCredit(a); });
   if (!fromList.some(function (a) { return a.id === F.acc; })) F.acc = fromList.length ? fromList[0].id : null;
-  $('accChips').innerHTML = fromList.map(function (a) { return '<button type="button" class="chip" data-acc="' + esc(a.id) + '" aria-pressed="' + (a.id === F.acc) + '">' + svg(accIcon(a), 14, 2) + esc(a.name) + '</button>'; }).join('') + '<button type="button" class="chip" data-open-acc>' + svg(P.plus, 14, 2) + 'Cuenta</button>';
+  $('accChips').innerHTML = fromList.map(function (a) { return '<button type="button" class="chip" data-acc="' + esc(a.id) + '" aria-pressed="' + (a.id === F.acc) + '">' + svg(accIcon(a), 14, 2) + esc(a.name) + '</button>'; }).join('');
   var toList_ = S.accounts.filter(function (a) { return a.id !== F.acc; });
   if (!toList_.some(function (a) { return a.id === F.to; })) F.to = toList_.length ? toList_[0].id : null;
   $('toChips').innerHTML = toList_.length ? toList_.map(function (a) { return '<button type="button" class="chip" data-to="' + esc(a.id) + '" aria-pressed="' + (a.id === F.to) + '">' + svg(accIcon(a), 14, 2) + esc(a.name) + '</button>'; }).join('') : '<span class="sub" style="font-size:13px">Necesitas al menos dos cuentas para transferir.</span>';
@@ -984,7 +1020,6 @@ $('accForm').addEventListener('submit', function (e) {
   closeSheet('accScrim');
   put('accounts/' + id, a).then(function () {
     if (fromTx) { F.acc = id; paintTx(); }
-    else if (!wasEdit && current() !== 'billetera') location.hash = 'billetera';
   });
   toast(wasEdit ? 'Cuenta actualizada' : 'Cuenta creada: ' + name);
 });
@@ -1143,7 +1178,7 @@ $('billDelete').addEventListener('click', function () { closeSheet('billScrim');
 document.addEventListener('click', function (e) {
   var t = e.target.closest('button, a'); if (!t) return;
   var d = t.dataset;
-  if (t.hasAttribute('data-open-add')) { if (!S.accounts.length) { toast('Primero crea una cuenta'); openAcc(); return; } openTx(); return; }
+  if (t.hasAttribute('data-open-add')) { if (!S.accounts.length) { toast('Primero crea una cuenta en Configuración'); location.hash = 'personalizar'; return; } if (!S.cats.length) { toast('Primero crea una categoría en Configuración'); location.hash = 'personalizar'; return; } openTx(); return; }
   if (d.close) { closeSheet(d.close); return; }
   if (t.hasAttribute('data-open-acc')) { openAcc(); return; }
   if (t.hasAttribute('data-open-cat')) { openCat(null, d.openCat === 'fromtx'); return; }
@@ -1170,6 +1205,7 @@ document.addEventListener('click', function (e) {
   if (d.facc) { var i1 = fAccs.indexOf(d.facc); if (i1 >= 0) fAccs.splice(i1, 1); else fAccs.push(d.facc); render(); return; }
   if (d.fcat) { var i2 = fCats.indexOf(d.fcat); if (i2 >= 0) fCats.splice(i2, 1); else fCats.push(d.fcat); render(); return; }
   if (d.accent) { S.settings.accent = d.accent; applyAccent(); put('settings/accent', d.accent); toast('Color actualizado'); return; }
+  if (d.theme) { S.settings.theme = d.theme; applyAccent(); render(); put('settings/theme', d.theme); return; }
   if (d.currency) { put('settings/currency', d.currency); toast('Moneda: ' + d.currency); return; }
   if (d.pay) {
     var card = acc(d.pay), debt = Math.max(-balances()[card.id], 0);

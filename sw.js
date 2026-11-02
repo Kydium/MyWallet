@@ -1,7 +1,7 @@
 // Service worker de My Wallet: guarda la app para que abra rápido y sin conexión.
 // Los datos no pasan por aquí: Firebase los maneja directamente.
-var VERSION = 'mywallet-v5';
-var SHELL = ['./', 'index.html', 'app.js?v=5', 'firebase-config.js?v=5', 'manifest.json',
+var VERSION = 'mywallet-v6';
+var SHELL = ['./', 'index.html', 'app.js?v=6', 'firebase-config.js?v=6', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/names.json'];
 
 self.addEventListener('install', function (e) {
