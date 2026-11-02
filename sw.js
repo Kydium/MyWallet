@@ -1,7 +1,7 @@
 // Service worker de My Wallet: guarda la app para que abra rápido y sin conexión.
 // Los datos no pasan por aquí: Firebase los maneja directamente.
-var VERSION = 'mywallet-v2';
-var SHELL = ['./', 'index.html', 'app.js', 'firebase-config.js', 'manifest.json',
+var VERSION = 'mywallet-v3';
+var SHELL = ['./', 'index.html', 'app.js?v=3', 'firebase-config.js?v=3', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', function (e) {
@@ -21,7 +21,7 @@ self.addEventListener('fetch', function (e) {
 
   // Archivos de la app: primero la red (para recibir actualizaciones), si no hay conexión, la copia guardada.
   if (url.origin === self.location.origin) {
-    e.respondWith(fetch(req).then(function (res) {
+    e.respondWith(fetch(new Request(req, {cache:'no-cache'})).then(function (res) {
       var copy = res.clone();
       caches.open(VERSION).then(function (c) { c.put(req, copy); });
       return res;
