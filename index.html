@@ -137,6 +137,9 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
 .empty{text-align:center;padding:36px 20px;display:flex;flex-direction:column;align-items:center;gap:8px}
 .empty .ic{width:52px;height:52px;border-radius:17px;background:var(--green-soft);color:var(--green)}
 .bottom{display:none}
+.net{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 14px;font-size:13px;color:var(--ink2);margin-bottom:14px}
+.net[hidden]{display:none}
+.net svg{flex-shrink:0;color:var(--muted)}
 .statgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .statgrid .metric b{font-size:20px}
 .pairs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;align-items:end;height:170px}
@@ -258,7 +261,7 @@ html[data-theme="dark"] .balance{border:1px solid #2E333B}
     </button>
     <div class="foot" id="sideUser"></div>
   </aside>
-  <main><div class="wrap" id="view"></div></main>
+  <main><div class="wrap"><div class="net" id="net" role="status" hidden></div></div><div class="wrap" id="view"></div></main>
 </div>
 
 <nav class="bottom" id="bottomnav" aria-label="Navegación" hidden></nav>
@@ -395,7 +398,7 @@ html[data-theme="dark"] .balance{border:1px solid #2E333B}
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-database-compat.js"></script>
-<script src="firebase-config.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="firebase-config.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

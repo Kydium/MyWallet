@@ -111,7 +111,7 @@ var S = { user:null, accounts:[], cats:[], tx:[], goals:[], bills:[], settings:{
 var ref = null, seeding = false;
 var viewMonth = ym(new Date());
 var fKind = 'todos', fAccs = [], fCats = [], filterOpen = false, query = '';
-var installEvt = null;
+var installEvt = null, confirmLogout = false;
 
 /* ------------------------------------------------------------------ */
 /* Utilidades                                                          */
@@ -214,9 +214,68 @@ function fail(e) {
   console.error(e);
   toast(e && e.code === 'PERMISSION_DENIED' ? 'No tienes permiso para guardar. Vuelve a iniciar sesión.' : 'No se pudo guardar. Revisa tu conexión.');
 }
-function put(path, obj) { return ref.child(path).set(obj).catch(fail); }
-function patch(obj) { return ref.update(obj).catch(fail); }
-function del(path) { return ref.child(path).remove().catch(fail); }
+/* ---------- Modo sin conexión ----------
+   LOCAL es la copia completa de tu billetera guardada en este dispositivo.
+   Cada cambio se aplica primero a LOCAL (se ve al instante y queda guardado aunque cierres la app)
+   y se anota en una "bandeja de salida" que se envía a Firebase; cuando Firebase confirma, sale de la bandeja.
+   Si no hay internet, la bandeja espera y se envía sola al volver la conexión, incluso si cerraste la app. */
+var LOCAL = null, outbox = [], online = true, onlineKnown = false;
+function cacheKey() { return 'mw-cache-' + (S.user ? S.user.uid : ''); }
+function outboxKey() { return 'mw-outbox-' + (S.user ? S.user.uid : ''); }
+function loadLocal() {
+  try { LOCAL = JSON.parse(localStorage.getItem(cacheKey()) || 'null'); } catch (e) { LOCAL = null; }
+  try { outbox = JSON.parse(localStorage.getItem(outboxKey()) || '[]'); } catch (e) { outbox = []; }
+  if (!Array.isArray(outbox)) outbox = [];
+}
+function saveLocal() { try { localStorage.setItem(cacheKey(), JSON.stringify(LOCAL)); } catch (e) {} }
+function saveOutbox() { try { localStorage.setItem(outboxKey(), JSON.stringify(outbox)); } catch (e) {} }
+function clearLocal() { try { localStorage.removeItem(cacheKey()); localStorage.removeItem(outboxKey()); } catch (e) {} LOCAL = null; outbox = []; }
+function applyUpd(obj, upd) {
+  Object.keys(upd).forEach(function (path) {
+    var parts = path.split('/').filter(Boolean), o = obj;
+    for (var i = 0; i < parts.length - 1; i++) { if (!o[parts[i]] || typeof o[parts[i]] !== 'object') o[parts[i]] = {}; o = o[parts[i]]; }
+    var k = parts[parts.length - 1], v = upd[path];
+    if (v === null || v === undefined) delete o[k]; else o[k] = JSON.parse(JSON.stringify(v));
+  });
+}
+function refreshFromLocal() { if (!LOCAL) return; hydrate(JSON.parse(JSON.stringify(LOCAL))); render(); }
+function sendItem(item) {
+  if (!ref) return Promise.resolve();
+  return ref.update(item.upd).then(function () {
+    outbox = outbox.filter(function (x) { return x.id !== item.id; }); saveOutbox(); netBadge();
+  }).catch(function (e) {
+    outbox = outbox.filter(function (x) { return x.id !== item.id; }); saveOutbox(); netBadge(); fail(e);
+  });
+}
+function commit(upd) {
+  var item = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), upd: upd};
+  outbox.push(item); saveOutbox();
+  if (LOCAL) { applyUpd(LOCAL, upd); saveLocal(); refreshFromLocal(); }
+  netBadge();
+  return sendItem(item);
+}
+function put(path, obj) { var u = {}; u[path] = obj; return commit(u); }
+function patch(obj) { return commit(obj); }
+function del(path) { var u = {}; u[path] = null; return commit(u); }
+function netBadge() {
+  var el = $('net'); if (!el) return;
+  var n = outbox.length;
+  if (onlineKnown && !online) {
+    el.hidden = false;
+    el.innerHTML = svg('<path d="M3 3l18 18"/><path d="M9.5 5.5A7 7 0 0 1 19 11a4 4 0 0 1 1.7 7.3M17 17H7a5 5 0 0 1-1.6-9.7"/>', 18, 2) + '<span><b>Sin conexión.</b> ' + (n ? plural(n, 'cambio guardado', 'cambios guardados') + ' en este dispositivo; ' + (n === 1 ? 'se subirá' : 'se subirán') + ' cuando vuelva el internet.' : 'Puedes seguir usando la app; lo que registres se guarda aquí y se sube cuando vuelva el internet.') + '</span>';
+  } else if (n && onlineKnown) {
+    el.hidden = false;
+    el.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:3px" aria-hidden="true"></span><span>Sincronizando ' + plural(n, 'cambio', 'cambios') + '…</span>';
+  } else el.hidden = true;
+}
+db.ref('.info/connected').on('value', function (snap) {
+  online = !!snap.val();
+  if (online) onlineKnown = true;
+  netBadge();
+});
+setTimeout(function () { onlineKnown = true; netBadge(); }, 3500);
+window.addEventListener('online', netBadge);
+window.addEventListener('offline', function () { online = false; onlineKnown = true; netBadge(); });
 
 function show(which) {
   $('loading').hidden = which !== 'loading';
@@ -230,16 +289,27 @@ auth.getRedirectResult().catch(function (e) { loginError(e); });
 auth.onAuthStateChanged(function (u) {
   if (ref) { ref.off(); ref = null; }
   S.user = u;
-  if (!u) { applyAccent(); show('login'); return; }
-  $('loadingMsg').textContent = 'Cargando tu billetera…';
-  show('loading');
+  if (!u) { LOCAL = null; outbox = []; applyAccent(); show('login'); return; }
   ref = db.ref('billetera/' + u.uid);
+  loadLocal();
+  if (LOCAL && LOCAL.meta) {
+    outbox.forEach(function (it) { applyUpd(LOCAL, it.upd); });
+    show('app'); refreshFromLocal(); netBadge();
+  } else {
+    LOCAL = null;
+    $('loadingMsg').textContent = navigator.onLine === false ? 'Necesitas internet la primera vez que abres tu billetera en este dispositivo.' : 'Cargando tu billetera…';
+    show('loading');
+  }
+  outbox.slice().forEach(sendItem);
   ref.on('value', function (snap) {
     var v = snap.val();
-    if (!v || !v.meta) { seedUser(u); return; }
-    hydrate(v);
+    if (!v || !v.meta) { if (!outbox.length) seedUser(u); return; }
+    LOCAL = v;
+    outbox.forEach(function (it) { applyUpd(LOCAL, it.upd); });
+    saveLocal();
     show('app');
-    render();
+    refreshFromLocal();
+    netBadge();
     runAuto();
   }, function (err) {
     console.error(err);
@@ -290,6 +360,7 @@ function loginError(e) {
   $('loginErr').textContent = map[e.code] || ('No se pudo iniciar sesión (' + (e.code || e.message) + ').');
 }
 $('googleBtn').addEventListener('click', function () {
+  if (navigator.onLine === false) { $('loginErr').textContent = 'Necesitas internet para iniciar sesión. Después podrás usar la app sin conexión.'; return; }
   var b = $('googleBtn'); b.disabled = true; $('loginErr').textContent = '';
   auth.signInWithPopup(provider).catch(function (e) {
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') return auth.signInWithRedirect(provider);
@@ -740,8 +811,9 @@ function runAuto() {
   });
   if (!n) return;
   autoBusy = true;
-  ref.update(upd).then(function () { autoBusy = false; toast(plural(n, 'pago fijo se registró', 'pagos fijos se registraron') + ' automáticamente'); })
-    .catch(function (e) { autoBusy = false; fail(e); });
+  commit(upd);
+  autoBusy = false;
+  toast(plural(n, 'pago fijo se registró', 'pagos fijos se registraron') + ' automáticamente');
 }
 
 function cfgData(kind) {
@@ -1241,7 +1313,10 @@ document.addEventListener('click', function (e) {
   if (d.bday !== undefined) { var di = +d.bday, ix = B.days.indexOf(di); if (ix >= 0) B.days.splice(ix, 1); else B.days.push(di); paintBill(); return;
   }
   if (t.hasAttribute('data-install') || t.id === 'installLogin') { if (installEvt) { installEvt.prompt(); installEvt.userChoice.then(function () { installEvt = null; $('installLogin').hidden = true; render(); }); } return; }
-  if (t.hasAttribute('data-logout')) { auth.signOut(); location.hash = ''; return; }
+  if (t.hasAttribute('data-logout')) {
+    if (outbox.length && !confirmLogout) { confirmLogout = true; toast('Tienes ' + plural(outbox.length, 'cambio', 'cambios') + ' sin subir. Conéctate a internet antes de cerrar sesión, o toca otra vez para cerrar igual.'); setTimeout(function () { confirmLogout = false; }, 6000); return; }
+    clearLocal(); auth.signOut(); location.hash = ''; return;
+  }
 });
 ['txScrim', 'accScrim', 'catScrim', 'goalScrim', 'billScrim'].forEach(function (id) { $(id).addEventListener('click', function (e) { if (e.target.id === id) closeSheet(id); }); });
 document.addEventListener('keydown', function (e) {
