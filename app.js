@@ -344,18 +344,19 @@ var VIEWS = [
   {id:'personalizar', name:'Configuración', icon:P.gear}
 ];
 var ALIAS = {cuentas:'billetera', reportes:'estadisticas', metas:'presupuesto', configuracion:'personalizar'};
-function current() { var h = (location.hash || '').slice(1); h = ALIAS[h] || h; return VIEWS.some(function (v) { return v.id === h; }) ? h : 'inicio'; }
+var SUBVIEWS = {'cfg-cuentas':1, 'cfg-categorias':1, 'cfg-pagos':1, 'cfg-metas':1};
+function current() { var h = (location.hash || '').slice(1); h = ALIAS[h] || h; if (SUBVIEWS[h]) return h; return VIEWS.some(function (v) { return v.id === h; }) ? h : 'inicio'; }
 
 function renderNav() {
   var cur = current();
   $('sidenav').innerHTML = VIEWS.map(function (v) {
-    return '<a class="navlink" href="#' + v.id + '"' + (v.id === cur ? ' aria-current="page"' : '') + '>' + svg(v.icon, 20) + v.name + '</a>';
+    return '<a class="navlink" href="#' + v.id + '"' + (v.id === cur || (SUBVIEWS[cur] && v.id === 'personalizar') ? ' aria-current="page"' : '') + '>' + svg(v.icon, 20) + v.name + '</a>';
   }).join('');
   var mob = ['inicio', 'presupuesto', 'movimientos', 'estadisticas', 'billetera'], parent = {personalizar:'inicio'};
   var html = '<button class="fab" data-open-add aria-label="Agregar movimiento">' + svg(P.plus, 26, 2.2) + '</button>';
   mob.forEach(function (id) {
     var v = VIEWS.filter(function (x) { return x.id === id; })[0];
-    var on = id === cur || parent[cur] === id;
+    var on = id === cur || parent[cur] === id || (SUBVIEWS[cur] && id === 'inicio');
     html += '<a href="#' + id + '"' + (on ? ' aria-current="page"' : '') + '>' + svg(v.icon, 22) + (v.short || v.name) + '</a>';
   });
   $('bottomnav').innerHTML = html;
@@ -743,9 +744,34 @@ function runAuto() {
     .catch(function (e) { autoBusy = false; fail(e); });
 }
 
-function viewPersonalizar() {
+function cfgData(kind) {
   var used = {}; S.tx.forEach(function (t) { used[t.cat] = (used[t.cat] || 0) + 1; });
-  var u = S.user || {}, bal = balances();
+  var bal = balances();
+  function editBtn(attr, id, name) { return '<button class="del" ' + attr + '="' + esc(id) + '" aria-label="Editar ' + esc(name) + '">' + svg(P.edit, 18) + '</button>'; }
+  if (kind === 'cfg-cuentas') return {title:'Cuentas y tarjetas', add:'data-open-acc', addText:'Nueva cuenta', icon:'wallet', color:'verde', count:S.accounts.length, one:'cuenta', many:'cuentas',
+    empty:'Agrega tu efectivo, Yape, cuentas de banco, ahorros y tarjetas de crédito.',
+    rows:S.accounts.map(function (a) {
+      var info = isCredit(a) ? 'Disponible ' + money(Math.max((a.limit || 0) - Math.max(-bal[a.id], 0), 0)) + ' de ' + money(a.limit || 0) : (bal[a.id] < 0 ? '−' : '') + money(bal[a.id]);
+      return '<div class="setrow">' + tile(accIcon(a), a.color, 40, 13) + '<div class="t"><b>' + esc(a.name) + '</b><span>' + (TYPES[a.type] || TYPES.efectivo).name + ' · ' + info + '</span></div>' + editBtn('data-edit-acc', a.id, a.name) + '</div>';
+    }).join('')};
+  if (kind === 'cfg-categorias') return {title:'Categorías y límites', add:'data-open-cat', addText:'Nueva categoría', icon:'dots', color:'naranja', count:S.cats.length, one:'categoría', many:'categorías',
+    empty:'Crea categorías para ordenar tus gastos y ponles un límite mensual.',
+    rows:S.cats.map(function (c) { var n = used[c.id] || 0; return '<div class="setrow">' + tile(c.icon, c.color, 40, 13) + '<div class="t"><b>' + esc(c.name) + '</b><span>' + (c.limit ? 'Límite ' + money(c.limit) + ' al mes' : 'Sin límite') + ' · ' + plural(n, 'movimiento', 'movimientos') + '</span></div>' + editBtn('data-edit-cat', c.id, c.name) + '</div>'; }).join('')};
+  if (kind === 'cfg-pagos') return {title:'Pagos fijos', add:'data-open-bill', addText:'Nuevo pago', icon:'ti-repeat', color:'azul', count:S.bills.length, one:'pago fijo', many:'pagos fijos',
+    empty:'Lo que pagas seguido: cada lunes, el 5 de cada mes, cada año o en una fecha exacta.',
+    rows:S.bills.map(billRow).join('')};
+  return {title:'Metas de ahorro', add:'data-open-goal', addText:'Nueva meta', icon:'star', color:'amarillo', count:S.goals.length, one:'meta', many:'metas',
+    empty:'Un viaje, una laptop, tu fondo de emergencia…',
+    rows:S.goals.map(function (g) { return '<div class="setrow">' + tile(g.icon || 'star', g.color || 'verde', 40, 13) + '<div class="t"><b>' + esc(g.name) + '</b><span>' + money(g.saved || 0) + ' de ' + money(g.target) + '</span></div>' + editBtn('data-edit-goal', g.id, g.name) + '</div>'; }).join('')};
+}
+function viewCfgList(kind) {
+  var d = cfgData(kind);
+  return '<div class="top"><div><a class="link" href="#personalizar" style="display:inline-flex;align-items:center;gap:4px;font-size:14px">' + svg(P.left, 16, 2.2) + 'Configuración</a><h1>' + d.title + '</h1></div>' +
+    '<button class="btn btn-dark" ' + d.add + '>' + svg(P.plus, 18, 2.2) + d.addText + '</button></div>' +
+    '<div class="card">' + (d.rows || '<p class="sub" style="margin:0">' + d.empty + '</p>') + '</div>';
+}
+function viewPersonalizar() {
+  var u = S.user || {};
   var standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
   var ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   var install = standalone ? '<p class="sub" style="margin:0;font-size:13px">Ya estás usando la app instalada.</p>'
@@ -753,30 +779,20 @@ function viewPersonalizar() {
     : ios ? '<p class="sub" style="margin:0;font-size:13px">En iPhone: toca Compartir y luego "Agregar a pantalla de inicio".</p>'
     : '<p class="sub" style="margin:0;font-size:13px">Abre el menú del navegador (⋮) y elige "Instalar app" o "Agregar a la pantalla de inicio".</p>';
   var theme = S.settings.theme || 'auto';
-  function section(title, btnAttr, btnText, rows, empty) {
-    return '<div class="card"><div class="row-between" style="align-items:center;margin-bottom:4px"><h2 style="margin:0">' + title + '</h2><button class="btn btn-dark btn-sm" ' + btnAttr + '>' + svg(P.plus, 16, 2.2) + btnText + '</button></div>' + (rows || '<p class="sub" style="margin:10px 0 0;font-size:13px">' + empty + '</p>') + '</div>';
-  }
-  function editBtn(attr, id, name) { return '<button class="del" ' + attr + '="' + esc(id) + '" aria-label="Editar ' + esc(name) + '">' + svg(P.edit, 18) + '</button>'; }
-  var accRows = S.accounts.map(function (a) {
-    var info = isCredit(a) ? 'Disponible ' + money(Math.max((a.limit || 0) - Math.max(-bal[a.id], 0), 0)) + ' de ' + money(a.limit || 0) : (bal[a.id] < 0 ? '−' : '') + money(bal[a.id]);
-    return '<div class="setrow">' + tile(accIcon(a), a.color, 40, 13) + '<div class="t"><b>' + esc(a.name) + '</b><span>' + (TYPES[a.type] || TYPES.efectivo).name + ' · ' + info + '</span></div>' + editBtn('data-edit-acc', a.id, a.name) + '</div>';
+  var menu = ['cfg-cuentas', 'cfg-categorias', 'cfg-pagos', 'cfg-metas'].map(function (k) {
+    var d = cfgData(k);
+    return '<a class="setrow menurow" href="#' + k + '">' + tile(d.icon, d.color, 40, 13) + '<span class="t"><b>' + d.title + '</b><span>' + (d.count ? plural(d.count, d.one, d.many) : 'Sin ' + d.many + ' todavía') + '</span></span>' + svg(P.right, 20, 2) + '</a>';
   }).join('');
-  var catRows = S.cats.map(function (c) { var n = used[c.id] || 0; return '<div class="setrow">' + tile(c.icon, c.color, 40, 13) + '<div class="t"><b>' + esc(c.name) + '</b><span>' + (c.limit ? 'Límite ' + money(c.limit) + ' al mes' : 'Sin límite') + ' · ' + plural(n, 'movimiento', 'movimientos') + '</span></div>' + editBtn('data-edit-cat', c.id, c.name) + '</div>'; }).join('');
-  var billRows = S.bills.map(billRow).join('');
-  var goalRows = S.goals.map(function (g) { return '<div class="setrow">' + tile(g.icon || 'star', g.color || 'verde', 40, 13) + '<div class="t"><b>' + esc(g.name) + '</b><span>' + money(g.saved || 0) + ' de ' + money(g.target) + '</span></div>' + editBtn('data-edit-goal', g.id, g.name) + '</div>'; }).join('');
   return '<div class="top"><div><div class="sub">Agrega y personaliza todo desde aquí</div><h1>Configuración</h1></div></div>' +
   '<div class="grid">' +
     '<div class="c7" style="display:flex;flex-direction:column;gap:16px">' +
-      section('Cuentas y tarjetas', 'data-open-acc', 'Nueva cuenta', accRows, 'Agrega tu efectivo, Yape, cuentas de banco, ahorros y tarjetas de crédito.') +
-      section('Categorías y límites', 'data-open-cat', 'Nueva categoría', catRows, 'Crea categorías para ordenar tus gastos.') +
-      section('Pagos fijos', 'data-open-bill', 'Nuevo pago', billRows, 'Lo que pagas seguido: cada lunes, el 5 de cada mes, cada año o en una fecha exacta.') +
-      section('Metas de ahorro', 'data-open-goal', 'Nueva meta', goalRows, 'Un viaje, una laptop, tu fondo de emergencia…') +
-    '</div>' +
-    '<div class="c5" style="display:flex;flex-direction:column;gap:16px">' +
+      '<div class="card" style="padding:6px 20px">' + menu + '</div>' +
       '<div class="card"><h2>Apariencia</h2><span class="lab">Tema</span><div class="seg" style="margin-bottom:16px">' +
         [['light','Claro'],['dark','Oscuro'],['auto','Automático']].map(function (o) { return '<button data-theme="' + o[0] + '" aria-pressed="' + (theme === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>' +
         '<span class="lab">Color de la app</span><div class="swatches">' + Object.keys(ACCENTS).map(function (k) { return '<button class="swatch" data-accent="' + k + '" aria-label="Color ' + k + '" aria-pressed="' + (S.settings.accent === k) + '" style="background:' + ACCENTS[k].main + ';width:44px;height:44px;border-radius:22px"></button>'; }).join('') + '</div>' +
-        '<p class="hint">Automático usa el modo del celular (claro de día u oscuro si lo tienes activado).</p></div>' +
+        '<p class="hint">Automático usa el modo del celular (claro u oscuro).</p></div>' +
+    '</div>' +
+    '<div class="c5" style="display:flex;flex-direction:column;gap:16px">' +
       '<div class="card"><h2>Moneda</h2><div class="chips">' + CURRENCIES.map(function (c) { return '<button class="chip" data-currency="' + esc(c) + '" aria-pressed="' + (S.settings.currency === c) + '">' + esc(c) + '</button>'; }).join('') + '</div><p class="hint">Solo cambia el símbolo que se muestra, no convierte montos.</p></div>' +
       '<div class="card"><h2>Tu cuenta</h2><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">' + avatar(u) + '<div style="min-width:0;display:flex;flex-direction:column"><b style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.displayName || '') + '</b><span class="sub" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(u.email || '') + '</span></div></div>' +
         '<label class="lab" for="sName">Cómo te saludamos</label><input class="field" id="sName" maxlength="20" value="' + esc(S.settings.name || '') + '" placeholder="Tu nombre">' +
@@ -802,14 +818,14 @@ function applyAccent() {
   var a = ACCENTS[S.settings.accent] || ACCENTS.verde, r = document.documentElement.style;
   if (isDark()) { var m = mixHex(a.main, '#ffffff', .18); a = {main:m, soft:hexA(m, .22), ink:a.light, light:a.light}; }
   r.setProperty('--green', a.main); r.setProperty('--green-soft', a.soft); r.setProperty('--green-ink', a.ink); r.setProperty('--mint', a.light);
-  var meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute('content', isDark() ? '#0F1114' : a.main);
+  var meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute('content', isDark() ? '#0F1114' : '#F4F3EF');
   document.querySelectorAll('.cur').forEach(function (el) { el.textContent = S.settings.currency; });
 }
 function render() {
   if (!S.user || $('app').hidden) return;
   applyAccent(); renderNav();
   var v = current();
-  var html = v === 'movimientos' ? viewMovimientos() : v === 'billetera' ? viewCuentas() : v === 'presupuesto' ? viewPresupuesto() : v === 'estadisticas' ? viewEstadisticas() : v === 'personalizar' ? viewPersonalizar() : viewInicio();
+  var html = SUBVIEWS[v] ? viewCfgList(v) : v === 'movimientos' ? viewMovimientos() : v === 'billetera' ? viewCuentas() : v === 'presupuesto' ? viewPresupuesto() : v === 'estadisticas' ? viewEstadisticas() : v === 'personalizar' ? viewPersonalizar() : viewInicio();
   var active = document.activeElement && document.activeElement.id;
   $('view').innerHTML = html;
   var q = $('q');

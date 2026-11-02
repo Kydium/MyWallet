@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>My Wallet</title>
 <meta name="description" content="Controla tus gastos, cuentas, tarjetas y presupuestos.">
-<meta name="theme-color" content="#0E7C5A">
-<script>try{var t=localStorage.getItem("mw-theme")||"auto";if(t==="dark"||(t==="auto"&&window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
+<meta name="theme-color" content="#F4F3EF">
+<script>try{var t=localStorage.getItem("mw-theme")||"auto";if(t==="dark"||(t==="auto"&&window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)){document.documentElement.setAttribute("data-theme","dark");document.querySelector('meta[name="theme-color"]').setAttribute("content","#0F1114");}}catch(e){}</script>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -131,6 +131,9 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
 .addcard:hover{background:var(--hover)}
 .setrow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--hair)}
 .setrow:last-child{border-bottom:0}
+.menurow{text-decoration:none;color:var(--ink);padding:14px 0}
+.menurow>svg{color:var(--muted);flex-shrink:0}
+.menurow:hover .t b{text-decoration:underline}
 .empty{text-align:center;padding:36px 20px;display:flex;flex-direction:column;align-items:center;gap:8px}
 .empty .ic{width:52px;height:52px;border-radius:17px;background:var(--green-soft);color:var(--green)}
 .bottom{display:none}
@@ -392,7 +395,7 @@ html[data-theme="dark"] .balance{border:1px solid #2E333B}
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-database-compat.js"></script>
-<script src="firebase-config.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="firebase-config.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
