@@ -293,27 +293,26 @@ function stats(m) {
 /* ------------------------------------------------------------------ */
 var VIEWS = [
   {id:'inicio', name:'Inicio', icon:'home'},
-  {id:'movimientos', name:'Movimientos', icon:P.list},
-  {id:'cuentas', name:'Cuentas', icon:'wallet'},
   {id:'presupuesto', name:'Presupuesto', icon:P.target},
-  {id:'reportes', name:'Reportes', icon:P.chart},
-  {id:'metas', name:'Metas y pagos', icon:P.flag},
+  {id:'movimientos', name:'Movimientos', icon:P.list},
+  {id:'estadisticas', name:'Estadísticas', icon:P.chart},
+  {id:'billetera', name:'Mi billetera', short:'Billetera', icon:'wallet'},
   {id:'personalizar', name:'Personalizar', icon:P.gear}
 ];
-function current() { var h = (location.hash || '').slice(1); return VIEWS.some(function (v) { return v.id === h; }) ? h : 'inicio'; }
+var ALIAS = {cuentas:'billetera', reportes:'estadisticas', metas:'presupuesto'};
+function current() { var h = (location.hash || '').slice(1); h = ALIAS[h] || h; return VIEWS.some(function (v) { return v.id === h; }) ? h : 'inicio'; }
 
 function renderNav() {
   var cur = current();
   $('sidenav').innerHTML = VIEWS.map(function (v) {
     return '<a class="navlink" href="#' + v.id + '"' + (v.id === cur ? ' aria-current="page"' : '') + '>' + svg(v.icon, 20) + v.name + '</a>';
   }).join('');
-  var mob = ['inicio', 'movimientos', 'cuentas', 'presupuesto'], parent = {metas:'presupuesto', reportes:'presupuesto', personalizar:'inicio'};
-  var html = '';
-  mob.forEach(function (id, i) {
+  var mob = ['inicio', 'presupuesto', 'movimientos', 'estadisticas', 'billetera'], parent = {personalizar:'inicio'};
+  var html = '<button class="fab" data-open-add aria-label="Agregar movimiento">' + svg(P.plus, 26, 2.2) + '</button>';
+  mob.forEach(function (id) {
     var v = VIEWS.filter(function (x) { return x.id === id; })[0];
-    if (i === 2) html += '<button class="fab" data-open-add aria-label="Agregar movimiento">' + svg(P.plus, 24, 2.2) + '</button>';
     var on = id === cur || parent[cur] === id;
-    html += '<a href="#' + id + '"' + (on ? ' aria-current="page"' : '') + '>' + svg(v.icon, 22) + v.name + '</a>';
+    html += '<a href="#' + id + '"' + (on ? ' aria-current="page"' : '') + '>' + svg(v.icon, 22) + (v.short || v.name) + '</a>';
   });
   $('bottomnav').innerHTML = html;
   var u = S.user;
@@ -344,7 +343,7 @@ function accTile(a, bal) {
   var val = isCredit(a)
     ? '<span class="v">' + money(Math.max((a.limit || 0) - Math.max(-bal, 0), 0)) + '</span><span class="n" style="margin-top:-4px">disponible</span>'
     : '<span class="v">' + (bal < 0 ? '−' : '') + money(bal) + '</span>';
-  return '<a class="acc" href="#cuentas">' + tile(accIcon(a), a.color) + '<span class="n">' + esc(a.name) + '</span>' + val + '</a>';
+  return '<a class="acc" href="#billetera">' + tile(accIcon(a), a.color) + '<span class="n">' + esc(a.name) + '</span>' + val + '</a>';
 }
 function emptyBox(icon, title, text, btn) {
   return '<div class="card empty"><span class="ic">' + svg(icon, 24, 2) + '</span><b style="font-size:16px">' + title + '</b><span class="sub" style="max-width:340px">' + text + '</span>' + (btn || '') + '</div>';
@@ -371,10 +370,10 @@ function viewInicio() {
     '<div class="c7" style="display:flex;flex-direction:column;gap:16px">' +
       '<div class="balance"><div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">Tu dinero</span><span class="big">' + (s.cash < 0 ? '−' : '') + money(s.cash) + '</span>' + (s.debt > 0 ? '<span class="lbl">Deuda en tarjetas: <b style="color:#FFB4A3">' + money(s.debt) + '</b></span>' : '') + '</div>' +
       '<div class="duo"><div><span class="lbl" style="font-size:12px">Ingresos del mes</span><b style="color:var(--mint);font-size:15px">+' + money(s.inc) + '</b></div><div><span class="lbl" style="font-size:12px">Gastos del mes</span><b style="font-size:15px">−' + money(s.exp) + '</b></div></div></div>' +
-      '<div><div class="row-between" style="margin-bottom:10px"><b style="font-size:15px">Mis cuentas</b><a class="link" href="#cuentas">Gestionar</a></div><div class="accounts">' + S.accounts.map(function (a) { return accTile(a, s.bal[a.id]); }).join('') + '<button class="acc addcard" style="min-height:0;border-radius:18px" data-open-acc>' + svg(P.plus, 20, 2) + '<span style="font-size:13px">Agregar</span></button></div></div>' +
+      '<div><div class="row-between" style="margin-bottom:10px"><b style="font-size:15px">Mis cuentas</b><a class="link" href="#billetera">Gestionar</a></div><div class="accounts">' + S.accounts.map(function (a) { return accTile(a, s.bal[a.id]); }).join('') + '<button class="acc addcard" style="min-height:0;border-radius:18px" data-open-acc>' + svg(P.plus, 20, 2) + '<span style="font-size:13px">Agregar</span></button></div></div>' +
       budgetBlock(s) +
     '</div>' +
-    '<div class="c5">' + (recent.length
+    '<div class="c5" style="display:flex;flex-direction:column;gap:16px">' + upcomingCard() + (recent.length
       ? '<div class="card"><div class="row-between"><h2>Movimientos recientes</h2><a class="link" href="#movimientos">Ver todo</a></div>' + recent.map(function (t) { return txRow(t, true); }).join('') + '</div>'
       : emptyBox('coins', 'Registra tu primer gasto', 'Cada gasto o ingreso que anotes actualiza tus cuentas, tu presupuesto y tus reportes.', '<button class="btn btn-primary" data-open-add style="margin-top:6px">' + svg(P.plus, 18, 2.2) + 'Agregar movimiento</button>')) +
     '</div>' +
@@ -396,9 +395,9 @@ function viewCuentas() {
     return '<div class="acccard"><div class="head">' + tile(accIcon(a), a.color, 40, 13) + '<div style="flex:1;min-width:0;display:flex;flex-direction:column"><b style="font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(a.name) + '</b><span class="typetag">' + (TYPES[a.type] || TYPES.efectivo).name + '</span></div>' +
       '<button class="del" data-edit-acc="' + esc(a.id) + '" aria-label="Editar ' + esc(a.name) + '">' + svg(P.edit, 18) + '</button></div>' + body + '</div>';
   }).join('');
-  return '<div class="top"><div><div class="sub">Dónde guardas tu plata</div><h1>Cuentas</h1></div><button class="btn btn-dark" data-open-acc>' + svg(P.plus, 18, 2.2) + 'Agregar cuenta</button></div>' +
+  return '<div class="top"><div><div class="sub">Tus cuentas, tarjetas y ahorros</div><h1>Mi billetera</h1></div><button class="btn btn-dark" data-open-acc>' + svg(P.plus, 18, 2.2) + 'Agregar cuenta</button></div>' +
     '<div class="metrics"><div class="metric"><span class="sub" style="font-size:13px">Patrimonio neto</span><b>' + (s.net < 0 ? '−' : '') + money(s.net) + '</b></div><div class="metric"><span class="sub" style="font-size:13px">Tu dinero</span><b style="font-size:18px">' + money(s.cash) + '</b></div><div class="metric"><span class="sub" style="font-size:13px">Deuda en tarjetas</span><b style="font-size:18px;color:' + (s.debt > 0 ? 'var(--red)' : 'inherit') + '">' + money(s.debt) + '</b></div></div>' +
-    '<div class="accgrid">' + cards + '<button class="addcard" data-open-acc>' + svg(P.plus, 24, 2) + 'Agregar cuenta<span class="sub" style="font-weight:500;font-size:13px">Banco, ahorros, billetera o tarjeta</span></button></div>';
+    '<div class="accgrid">' + cards + '<button class="addcard" data-open-acc>' + svg(P.plus, 24, 2) + 'Agregar cuenta<span class="sub" style="font-weight:500;font-size:13px">Banco, ahorros, billetera o tarjeta</span></button></div>' + goalsCard();
 }
 
 function filterCount() { return (fKind !== 'todos' ? 1 : 0) + fAccs.length + fCats.length; }
@@ -452,7 +451,7 @@ function viewPresupuesto() {
   else hero = '<div class="balance" style="flex-direction:row;align-items:center;gap:20px">' +
       '<div class="donut" style="width:110px;height:110px;background:conic-gradient(var(--mint) 0 ' + Math.min(pct, 100) + '%, #2C3038 ' + Math.min(pct, 100) + '% 100%)"><div style="width:84px;height:84px;background:var(--dark)"><b style="font-size:22px">' + pct + '%</b><span class="lbl" style="font-size:11px">usado</span></div></div>' +
       '<div style="display:flex;flex-direction:column;gap:6px"><span class="lbl">' + (left >= 0 ? 'Te quedan para ' + mname : 'Te pasaste en ' + mname) + '</span><span class="big" style="font-size:30px">' + money(left) + '</span><span style="font-size:13px;color:#E0E3E8">' + (s.isCur ? (left > 0 ? 'Puedes gastar ' + money(perDay) + ' por día durante ' + plural(s.daysLeft, 'día', 'días') : 'Revisa tus categorías en rojo') : 'Presupuesto de ' + money(s.limit) + ' en total') + '</span></div></div>';
-  return '<div class="top"><div><div class="sub"><a class="link" href="#reportes">Reportes</a> · <a class="link" href="#metas">Metas y pagos fijos</a></div><h1>Presupuesto</h1></div>' + monthNav() + '</div>' +
+  return '<div class="top"><div><div class="sub">Límites del mes y pagos fijos</div><h1>Presupuesto</h1></div>' + monthNav() + '</div>' +
   '<div class="grid">' +
     '<div class="c5">' + hero + '</div>' +
     '<div class="c7"><div class="card"><div class="row-between"><h2>Por categoría</h2><a class="link" href="#personalizar">Editar límites</a></div>' +
@@ -464,60 +463,124 @@ function viewPresupuesto() {
         '<div class="bar" style="height:8px"><div style="width:' + Math.min(p, 100) + '%;background:' + (over ? '#D9472B' : p >= 90 ? '#E0A030' : cc.dot) + '"></div></div>' +
         (over ? '<span style="font-size:12px;font-weight:700;color:var(--red)">Te pasaste por ' + money(sp - c.limit) + '</span>' : '<span class="sub" style="font-size:12px">' + p + '% usado · quedan ' + money(c.limit - sp) + '</span>') + '</div>';
     }).join('') + '</div></div>' +
+    '<div class="c12">' + billsCard() + '</div>' +
   '</div>';
 }
 
-function viewReportes() {
+function viewEstadisticas() {
   var s = stats(viewMonth), a0 = 0;
+  var mtx = S.tx.filter(function (t) { return t.date && t.date.slice(0, 7) === viewMonth && t.cat !== 'transfer'; });
+  var exps = mtx.filter(function (t) { return t.amount < 0; });
   var stops = s.exp ? S.cats.map(function (c) { var p = (s.byCat[c.id] || 0) / s.exp * 100; var a = a0; a0 += p; return C(c.color).dot + ' ' + a.toFixed(2) + '% ' + a0.toFixed(2) + '%'; }).join(',') : '#ECEAE3 0 100%';
-  var months = [-3, -2, -1, 0].map(function (k) { var m = shiftMonth(viewMonth, k); return {m:monthShort(m), v:monthExpense(m)}; });
-  var max = Math.max.apply(null, months.map(function (m) { return m.v; })) || 1;
-  var prev = months[2].v, avg = s.exp / Math.max(s.daysElapsed, 1);
-  var insight;
-  if (!s.exp) insight = '';
-  else if (prev > 0) {
-    var diff = (s.exp - prev) / prev * 100;
-    insight = '<div class="c12"><div class="insight"><span style="width:42px;height:42px;border-radius:13px;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0">' + svg(diff <= 0 ? P.down : P.up, 20, 2) + '</span><div><b style="color:var(--green-ink);font-size:15px">' + (diff <= 0 ? 'Gastaste ' + Math.abs(diff).toFixed(1) + '% menos que el mes anterior' : 'Gastaste ' + diff.toFixed(1) + '% más que el mes anterior') + '</b><div style="font-size:13px;color:var(--green-ink);margin-top:2px">Tu promedio diario es ' + money(avg) + '</div></div></div></div>';
-  } else insight = '<div class="c12"><div class="insight"><div><b style="color:var(--green-ink);font-size:15px">Tu promedio diario es ' + money(avg) + '</b><div style="font-size:13px;color:var(--green-ink);margin-top:2px">Cuando tengas gastos del mes anterior, aquí verás la comparación.</div></div></div></div>';
-  return '<div class="top"><div><div class="sub">Cómo se mueve tu plata</div><h1>Reportes</h1></div>' + monthNav() + '</div>' +
-  (s.exp || s.inc ? '' : emptyBox(P.chart, 'Aún no hay datos este mes', 'Registra tus gastos y aquí verás en qué se va tu plata.')) +
-  '<div class="grid">' +
-    '<div class="c6"><div class="card"><h2>Gastos por categoría</h2><div class="donutwrap">' +
-      '<div class="donut" role="img" aria-label="Gastos por categoría" style="background:conic-gradient(' + stops + ')"><div><span class="sub" style="font-size:12px">Total</span><b style="font-size:17px">' + money(s.exp) + '</b></div></div>' +
-      '<div class="legend">' + S.cats.filter(function (c) { return (s.byCat[c.id] || 0) > 0 || !s.exp; }).map(function (c) { var v = s.byCat[c.id] || 0, p = s.exp ? v / s.exp * 100 : 0; return '<div><i style="background:' + C(c.color).dot + '"></i><span>' + esc(c.name) + '</span><b>' + money(v) + '</b><em class="sub" style="font-style:normal;width:46px;text-align:right">' + p.toFixed(1) + '%</em></div>'; }).join('') + '</div>' +
-    '</div></div></div>' +
-    '<div class="c6"><div class="card"><div class="row-between"><h2>Gasto por mes</h2><span class="sub" style="font-size:12px">Últimos 4 meses</span></div><div class="months">' +
-      months.map(function (m, i) { var last = i === months.length - 1; return '<div><span style="font-size:12px;font-weight:700;color:' + (last ? 'var(--green)' : 'var(--muted)') + '">' + money(m.v) + '</span><div class="b" style="height:' + Math.max(Math.round(m.v / max * 130), 4) + 'px;background:' + (last ? 'var(--green)' : '#D9D5CB') + '"></div><span class="sub" style="font-weight:600;font-size:13px">' + m.m + '</span></div>'; }).join('') +
-    '</div></div></div>' + insight +
+  var saved = s.inc - s.exp, rate = s.inc ? Math.round(saved / s.inc * 100) : null;
+  var avg = s.exp / Math.max(s.daysElapsed, 1);
+  var head = '<div class="top"><div><div class="sub">Cómo se mueve tu plata</div><h1>Estadísticas</h1></div>' + monthNav() + '</div>';
+  if (!mtx.length) return head + emptyBox(P.chart, 'Aún no hay datos en ' + MESES[+viewMonth.split('-')[1] - 1], 'Registra tus gastos e ingresos y aquí verás en qué se va tu plata, cuánto ahorras y cómo cambias mes a mes.', '<button class="btn btn-primary" data-open-add style="margin-top:6px">' + svg(P.plus, 18, 2.2) + 'Agregar movimiento</button>');
+
+  // Resumen
+  var metrics = '<div class="statgrid">' +
+    '<div class="metric"><span class="sub" style="font-size:13px">Ingresos</span><b style="color:var(--green)">' + money(s.inc) + '</b></div>' +
+    '<div class="metric"><span class="sub" style="font-size:13px">Gastos</span><b>' + money(s.exp) + '</b></div>' +
+    '<div class="metric"><span class="sub" style="font-size:13px">Ahorro del mes</span><b style="color:' + (saved < 0 ? 'var(--red)' : 'inherit') + '">' + (saved < 0 ? '−' : '') + money(saved) + '</b><span class="sub" style="font-size:12px">' + (rate === null ? 'Sin ingresos este mes' : (rate >= 0 ? 'Ahorraste el ' + rate + '% de lo que ganaste' : 'Gastaste más de lo que ganaste')) + '</span></div>' +
+    '<div class="metric"><span class="sub" style="font-size:13px">Promedio diario</span><b>' + money(avg) + '</b><span class="sub" style="font-size:12px">' + plural(exps.length, 'gasto', 'gastos') + ' en el mes</span></div>' +
   '</div>';
+
+  // Por categoría
+  var catCard = '<div class="card"><h2>Gastos por categoría</h2>' + (s.exp ? '<div class="donutwrap">' +
+      '<div class="donut" role="img" aria-label="Gastos por categoría" style="background:conic-gradient(' + stops + ')"><div><span class="sub" style="font-size:12px">Total</span><b style="font-size:17px">' + money(s.exp) + '</b></div></div>' +
+      '<div class="legend">' + S.cats.filter(function (c) { return (s.byCat[c.id] || 0) > 0; }).sort(function (a, b) { return (s.byCat[b.id] || 0) - (s.byCat[a.id] || 0); }).map(function (c) { var v = s.byCat[c.id] || 0, p = v / s.exp * 100; return '<div><i style="background:' + C(c.color).dot + '"></i><span>' + esc(c.name) + '</span><b>' + money(v) + '</b><em class="sub" style="font-style:normal;width:46px;text-align:right">' + p.toFixed(1) + '%</em></div>'; }).join('') + '</div></div>'
+    : '<p class="sub" style="margin:0">No hay gastos este mes.</p>') + '</div>';
+
+  // Ingresos vs gastos, últimos 6 meses
+  var six = [-5, -4, -3, -2, -1, 0].map(function (k) {
+    var m = shiftMonth(viewMonth, k), inc = 0, exp = 0;
+    S.tx.forEach(function (t) { if (!t.date || t.date.slice(0, 7) !== m || t.cat === 'transfer') return; if (t.amount > 0) inc += t.amount; else exp -= t.amount; });
+    return {m:m, inc:inc, exp:exp};
+  });
+  var max6 = Math.max.apply(null, six.map(function (x) { return Math.max(x.inc, x.exp); })) || 1;
+  var trend = '<div class="card"><div class="row-between"><h2>Ingresos y gastos</h2><span class="sub" style="font-size:12px">Últimos 6 meses</span></div>' +
+    '<div class="pairs">' + six.map(function (x) {
+      var on = x.m === viewMonth;
+      return '<div><div class="pb"><span style="height:' + Math.max(Math.round(x.inc / max6 * 130), 3) + 'px;background:' + (on ? 'var(--green)' : 'var(--mint)') + '" title="Ingresos ' + money(x.inc) + '"></span><span style="height:' + Math.max(Math.round(x.exp / max6 * 130), 3) + 'px;background:' + (on ? 'var(--ink)' : '#C9C5BA') + '" title="Gastos ' + money(x.exp) + '"></span></div><span class="sub" style="font-size:12px;font-weight:' + (on ? 700 : 500) + '">' + monthShort(x.m) + '</span></div>';
+    }).join('') + '</div>' +
+    '<div class="chips" style="margin-top:12px;gap:14px;font-size:12px;color:var(--muted)"><span style="display:flex;align-items:center;gap:6px"><i style="width:10px;height:10px;border-radius:3px;background:var(--green)"></i>Ingresos</span><span style="display:flex;align-items:center;gap:6px"><i style="width:10px;height:10px;border-radius:3px;background:var(--ink)"></i>Gastos</span></div></div>';
+
+  // Dónde más gastas
+  var byDesc = {};
+  exps.forEach(function (t) { var k = (t.desc || '').trim().toLowerCase(); if (!byDesc[k]) byDesc[k] = {name:t.desc, total:0, n:0, cat:t.cat}; byDesc[k].total -= t.amount; byDesc[k].n++; });
+  var top = Object.keys(byDesc).map(function (k) { return byDesc[k]; }).sort(function (a, b) { return b.total - a.total; }).slice(0, 5);
+  var topMax = top.length ? top[0].total : 1;
+  var topCard = '<div class="card"><h2>Dónde más gastas</h2>' + (top.length ? top.map(function (x) {
+    var c = cat(x.cat);
+    return '<div class="goal" style="gap:8px;padding:10px 0"><div style="display:flex;align-items:center;gap:10px">' + tile(c.icon, c.color, 28, 9) + '<b style="flex:1;font-size:14px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(x.name) + '</b><span class="sub" style="font-size:12px">' + plural(x.n, 'vez', 'veces') + '</span><b style="font-size:14px">' + money(x.total) + '</b></div><div class="bar" style="height:6px"><div style="width:' + Math.round(x.total / topMax * 100) + '%;background:' + C(c.color).dot + '"></div></div></div>';
+  }).join('') : '<p class="sub" style="margin:0">No hay gastos este mes.</p>') + '</div>';
+
+  // Por día de la semana (lunes a domingo)
+  var wd = [0, 0, 0, 0, 0, 0, 0];
+  exps.forEach(function (t) { var d = new Date(t.date + 'T12:00:00').getDay(); wd[(d + 6) % 7] -= t.amount; });
+  var wmax = Math.max.apply(null, wd) || 1, wTop = wd.indexOf(Math.max.apply(null, wd));
+  var WD = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'], WDL = ['los lunes', 'los martes', 'los miércoles', 'los jueves', 'los viernes', 'los sábados', 'los domingos'];
+  var weekCard = '<div class="card"><div class="row-between"><h2>Por día de la semana</h2>' + (s.exp ? '<span class="sub" style="font-size:12px">Gastas más ' + WDL[wTop] + '</span>' : '') + '</div><div class="week">' +
+    wd.map(function (v, i) { return '<div><span class="sub" style="font-size:11px">' + (v ? Math.round(v).toLocaleString('en-US') : '') + '</span><span class="b" style="height:' + Math.max(Math.round(v / wmax * 110), 3) + 'px;background:' + (i === wTop && v ? 'var(--green)' : '#D9D5CB') + '"></span><span class="sub" style="font-size:12px;font-weight:600">' + WD[i] + '</span></div>'; }).join('') + '</div></div>';
+
+  // Datos curiosos
+  var biggest = exps.slice().sort(function (a, b) { return a.amount - b.amount; })[0];
+  var prev = six[4].exp, insight = '';
+  if (s.exp && prev > 0) {
+    var diff = (s.exp - prev) / prev * 100;
+    insight = '<div class="insight"><span style="width:42px;height:42px;border-radius:13px;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0">' + svg(diff <= 0 ? P.down : P.up, 20, 2) + '</span><div><b style="color:var(--green-ink);font-size:15px">' + (diff <= 0 ? 'Gastaste ' + Math.abs(diff).toFixed(1) + '% menos que el mes anterior' : 'Gastaste ' + diff.toFixed(1) + '% más que el mes anterior') + '</b><div style="font-size:13px;color:var(--green-ink);margin-top:2px">' + monthTitle(shiftMonth(viewMonth, -1)) + ': ' + money(prev) + ' · ' + monthTitle(viewMonth) + ': ' + money(s.exp) + '</div></div></div>';
+  }
+  var facts = '<div class="card"><h2>Datos del mes</h2>' +
+    (biggest ? '<div class="setrow"><span class="t"><span>Tu gasto más grande</span><b>' + esc(biggest.desc) + ' · ' + shortDay(biggest.date) + '</b></span><b>' + money(biggest.amount) + '</b></div>' : '') +
+    '<div class="setrow"><span class="t"><span>Movimientos registrados</span><b>' + plural(mtx.length, 'movimiento', 'movimientos') + '</b></span></div>' +
+    '<div class="setrow"><span class="t"><span>Gasto promedio por compra</span><b>' + money(exps.length ? s.exp / exps.length : 0) + '</b></span></div>' +
+  '</div>';
+
+  return head + metrics + (insight ? insight : '') +
+    '<div class="grid"><div class="c6">' + catCard + '</div><div class="c6">' + trend + '</div>' +
+    '<div class="c6">' + topCard + '</div><div class="c6" style="display:flex;flex-direction:column;gap:16px">' + weekCard + facts + '</div></div>';
 }
 
-function viewMetas() {
-  var s = stats(curYM()), m = curYM();
+function goalsCard() {
   var goals = S.goals.length ? S.goals.map(function (g) {
     var p = g.target ? Math.min(Math.round((g.saved || 0) / g.target * 100), 100) : 0, done = (g.saved || 0) >= g.target;
     return '<div class="goal"><div style="display:flex;align-items:center;gap:10px">' + tile(g.icon || 'star', g.color || 'verde', 36, 12) + '<b style="flex:1;font-size:15px">' + esc(g.name) + '</b>' + (done ? '<span class="tag">' + svg(P.check, 14, 2.4) + 'Lograda</span>' : '<b style="color:var(--green);font-size:13px">' + p + '%</b>') + '<button class="del" data-edit-goal="' + esc(g.id) + '" aria-label="Editar ' + esc(g.name) + '">' + svg(P.edit, 18) + '</button></div>' +
       '<div class="bar" style="height:8px"><div style="width:' + p + '%;background:' + C(g.color || 'verde').dot + '"></div></div><div class="row-between sub" style="font-size:12px"><span>' + money(g.saved || 0) + ' de ' + money(g.target) + '</span><span>' + (done ? '¡Felicidades!' : 'Faltan ' + money(g.target - (g.saved || 0))) + '</span></div></div>';
   }).join('') : '<p class="sub" style="margin:0 0 4px">Crea una meta (un viaje, una laptop, tu fondo de emergencia) y ve sumando tus aportes.</p>';
-  var rows = S.bills.map(function (b) {
-    var paid = b.paid && b.paid[m], c = cat(b.cat), cc = C(c.color);
-    return '<div class="setrow"><span class="ic" style="background:' + cc.soft + ';color:' + cc.ink + ';flex-direction:column;line-height:1"><b style="font-size:14px">' + b.day + '</b><span style="font-size:9px;font-weight:700">' + MES3[new Date().getMonth()].toUpperCase() + '</span></span>' +
-      '<span class="t"><b>' + esc(b.name) + '</b><span>' + money(b.amount) + ' · ' + esc(acc(b.acc).name) + '</span></span>' +
-      (paid ? '<span class="tag">' + svg(P.check, 14, 2.4) + 'Pagado</span>' : '<button class="btn btn-primary btn-sm" data-paybill="' + esc(b.id) + '">Registrar</button>') +
-      '<button class="del" data-edit-bill="' + esc(b.id) + '" aria-label="Editar ' + esc(b.name) + '">' + svg(P.edit, 18) + '</button></div>';
-  });
+  return '<div class="card"><div class="row-between"><h2>Metas de ahorro</h2><button class="btn btn-dark btn-sm" data-open-goal>' + svg(P.plus, 16, 2.2) + 'Nueva meta</button></div>' + goals + '</div>';
+}
+
+function billRow(b, m, compact) {
+  var paid = b.paid && b.paid[m], c = cat(b.cat), cc = C(c.color), today = new Date().getDate();
+  var late = !paid && b.day < today, soon = !paid && b.day >= today && b.day - today <= 3;
+  var when = paid ? '' : late ? ' · <b style="color:var(--red)">venció el ' + b.day + '</b>' : b.day === today ? ' · <b style="color:var(--red)">vence hoy</b>' : soon ? ' · <b style="color:#8A6410">en ' + plural(b.day - today, 'día', 'días') + '</b>' : '';
+  return '<div class="setrow"><span class="ic" style="background:' + cc.soft + ';color:' + cc.ink + ';flex-direction:column;line-height:1"><b style="font-size:14px">' + b.day + '</b><span style="font-size:9px;font-weight:700">' + MES3[new Date().getMonth()].toUpperCase() + '</span></span>' +
+    '<span class="t"><b>' + esc(b.name) + '</b><span>' + money(b.amount) + ' · ' + esc(acc(b.acc).name) + when + '</span></span>' +
+    (paid ? '<span class="tag">' + svg(P.check, 14, 2.4) + 'Pagado</span>' : '<button class="btn btn-primary btn-sm" data-paybill="' + esc(b.id) + '">Registrar</button>') +
+    (compact ? '' : '<button class="del" data-edit-bill="' + esc(b.id) + '" aria-label="Editar ' + esc(b.name) + '">' + svg(P.edit, 18) + '</button>') + '</div>';
+}
+
+function billsCard() {
+  var s = stats(curYM()), m = curYM();
+  var rows = S.bills.map(function (b) { return billRow(b, m, false); });
   S.accounts.filter(isCredit).forEach(function (a) {
     var d = Math.max(-s.bal[a.id], 0); if (!(d > 0)) return;
     rows.push('<div class="setrow">' + tile(accIcon(a), a.color, 40, 13) + '<span class="t"><b>Pago ' + esc(a.name) + '</b><span>' + money(d) + ' · antes del ' + nextDateLabel(a.payDay) + '</span></span><button class="btn btn-primary btn-sm" data-pay="' + esc(a.id) + '">Pagar</button></div>');
   });
+  var total = S.bills.reduce(function (x, b) { return x + b.amount; }, 0);
   var pending = S.bills.filter(function (b) { return !(b.paid && b.paid[m]); }).reduce(function (x, b) { return x + b.amount; }, 0);
-  return '<div class="top"><div><div class="sub">Ahorro y pagos de cada mes</div><h1>Metas y pagos fijos</h1></div></div>' +
-  '<div class="grid">' +
-    '<div class="c6"><div class="card"><div class="row-between"><h2>Metas de ahorro</h2><button class="btn btn-dark btn-sm" data-open-goal>' + svg(P.plus, 16, 2.2) + 'Nueva</button></div>' + goals + '</div></div>' +
-    '<div class="c6"><div class="card"><div class="row-between"><h2>Pagos fijos de ' + MESES[new Date().getMonth()] + '</h2><button class="btn btn-dark btn-sm" data-open-bill>' + svg(P.plus, 16, 2.2) + 'Nuevo</button></div>' +
-      (S.bills.length ? '<p class="sub" style="margin:-6px 0 4px;font-size:13px">Pendiente: ' + money(pending) + '</p>' : '') +
-      (rows.length ? rows.join('') : '<p class="sub" style="margin:0">Agrega tus pagos de cada mes (alquiler, internet, luz…) y regístralos con un toque cuando los pagues.</p>') + '</div></div>' +
-  '</div>';
+  return '<div class="card"><div class="row-between" style="align-items:center"><h2 style="margin:0">Pagos fijos de ' + MESES[new Date().getMonth()] + '</h2><button class="btn btn-dark btn-sm" data-open-bill>' + svg(P.plus, 16, 2.2) + 'Nuevo pago</button></div>' +
+    (S.bills.length ? '<p class="sub" style="margin:8px 0 4px;font-size:13px">Todos los meses: ' + money(total) + ' · Falta pagar: ' + money(pending) + '</p>' : '<p class="sub" style="margin:10px 0 0">Anota lo que pagas cada mes y qué día (alquiler el 1, internet el 5, luz el 12…). Te avisamos cuando se acerque la fecha y lo registras con un toque.</p>') +
+    rows.join('') + '</div>';
+}
+
+function upcomingCard() {
+  var m = curYM(), today = new Date().getDate();
+  if (!S.bills.length) return '<div class="card"><div class="row-between" style="align-items:center"><h2 style="margin:0">Pagos fijos</h2><button class="btn btn-ghost btn-sm" data-open-bill>' + svg(P.plus, 16, 2.2) + 'Agregar</button></div><p class="sub" style="margin:10px 0 0;font-size:13px">Anota lo que pagas cada mes (alquiler, internet, luz…) y aquí verás lo que viene.</p></div>';
+  var pend = S.bills.filter(function (b) { return !(b.paid && b.paid[m]); }).sort(function (a, b) { return a.day - b.day; });
+  if (!pend.length) return '<div class="card"><div class="row-between"><h2 style="margin:0">Pagos fijos</h2><a class="link" href="#presupuesto">Ver todos</a></div><p class="sub" style="margin:10px 0 0;font-size:13px">' + svg(P.check, 14, 2.4) + ' Ya pagaste todos tus pagos fijos de este mes.</p></div>';
+  var sum = pend.reduce(function (x, b) { return x + b.amount; }, 0);
+  return '<div class="card"><div class="row-between"><h2 style="margin:0">Próximos pagos</h2><a class="link" href="#presupuesto">Ver todos</a></div><p class="sub" style="margin:6px 0 2px;font-size:13px">Te falta pagar ' + money(sum) + ' este mes</p>' + pend.slice(0, 3).map(function (b) { return billRow(b, m, true); }).join('') + '</div>';
 }
 
 function viewPersonalizar() {
@@ -558,7 +621,7 @@ function render() {
   if (!S.user || $('app').hidden) return;
   applyAccent(); renderNav();
   var v = current();
-  var html = v === 'movimientos' ? viewMovimientos() : v === 'cuentas' ? viewCuentas() : v === 'presupuesto' ? viewPresupuesto() : v === 'reportes' ? viewReportes() : v === 'metas' ? viewMetas() : v === 'personalizar' ? viewPersonalizar() : viewInicio();
+  var html = v === 'movimientos' ? viewMovimientos() : v === 'billetera' ? viewCuentas() : v === 'presupuesto' ? viewPresupuesto() : v === 'estadisticas' ? viewEstadisticas() : v === 'personalizar' ? viewPersonalizar() : viewInicio();
   var active = document.activeElement && document.activeElement.id;
   $('view').innerHTML = html;
   var q = $('q');
@@ -703,7 +766,7 @@ $('accForm').addEventListener('submit', function (e) {
   closeSheet('accScrim');
   put('accounts/' + id, a).then(function () {
     if (fromTx) { F.acc = id; paintTx(); }
-    else if (!wasEdit && current() !== 'cuentas') location.hash = 'cuentas';
+    else if (!wasEdit && current() !== 'billetera') location.hash = 'billetera';
   });
   toast(wasEdit ? 'Cuenta actualizada' : 'Cuenta creada: ' + name);
 });
@@ -892,7 +955,7 @@ $('gName').addEventListener('input', function () { $('gErr').textContent = ''; p
 ['gTarget', 'gSaved', 'gAdd'].forEach(function (id) { $(id).addEventListener('input', function () { $('gErr').textContent = ''; }); });
 ['bName', 'bAmount', 'bDay'].forEach(function (id) { $(id).addEventListener('input', function () { $('bErr').textContent = ''; }); });
 
-window.addEventListener('hashchange', function () { if (current() !== 'inicio' && ['movimientos', 'presupuesto', 'reportes'].indexOf(current()) < 0) viewMonth = curYM(); render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', function () { if (current() !== 'inicio' && ['movimientos', 'presupuesto', 'estadisticas'].indexOf(current()) < 0) viewMonth = curYM(); render(); window.scrollTo(0, 0); });
 
 /* ------------------------------------------------------------------ */
 /* Instalación (PWA)                                                   */
