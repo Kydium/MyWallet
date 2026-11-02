@@ -15,6 +15,7 @@
 <meta name="apple-mobile-web-app-title" content="My Wallet">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 <style>
 :root{
@@ -136,6 +137,8 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
 .scrim.on{display:flex}
 .sheet{background:var(--bg);width:100%;max-width:480px;border-radius:26px;padding:20px;display:flex;flex-direction:column;gap:14px;max-height:calc(100vh - 32px);overflow:auto}
 .seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:#E7E4DC;border-radius:14px;padding:4px;gap:4px}
+.seg4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.seg2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .seg button{height:38px;border:0;border-radius:10px;background:transparent;font-weight:600;color:var(--muted);font-size:13px}
 .seg button[aria-pressed="true"]{background:#fff;color:var(--ink);font-weight:700}
 .amount{display:flex;align-items:center;justify-content:center;gap:6px;font-size:40px;font-weight:800;padding:6px 0}
@@ -154,7 +157,7 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
 .swatches{display:flex;gap:10px;flex-wrap:wrap}
 .swatch{width:36px;height:36px;border-radius:18px;border:3px solid transparent;box-shadow:inset 0 0 0 2px #fff}
 .swatch[aria-pressed="true"]{border-color:var(--ink)}
-.icongrid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}
+.icongrid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;max-height:232px;overflow-y:auto;padding:2px;align-content:start}
 .icongrid button{aspect-ratio:1;border-radius:12px;border:2px solid transparent;background:#fff;display:flex;align-items:center;justify-content:center;color:#3A3D43;padding:0}
 .icongrid button[aria-pressed="true"]{border-color:var(--ink);color:var(--ink);background:var(--green-soft)}
 .preview{display:flex;align-items:center;gap:12px;background:#fff;border-radius:16px;padding:12px}
@@ -290,7 +293,7 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
         <div><label class="lab" for="aPay">Día de pago</label><input class="field" id="aPay" inputmode="numeric" placeholder="5"></div>
       </div>
     </div>
-    <div><span class="lab">Ícono</span><div class="icongrid" id="accIcons"></div></div>
+    <div><span class="lab">Ícono</span><input class="field" type="search" data-iconq="acc" id="aIconQ" placeholder="Buscar: perro, pizza, auto, gimnasio…" aria-label="Buscar ícono" style="margin-bottom:8px"><div class="icongrid" id="accIcons"></div></div>
     <div><span class="lab">Color</span><div class="swatches" id="accColors"></div></div>
     <p class="err" id="aErr" role="alert"></p>
     <div style="display:flex;gap:10px">
@@ -310,7 +313,7 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
     <div class="preview" id="catPreview"></div>
     <div><label class="lab" for="cName">Nombre</label><input class="field" id="cName" maxlength="20" placeholder="Mascotas"></div>
     <div><label class="lab" for="cLimit">Presupuesto mensual</label><input class="field" id="cLimit" inputmode="decimal" placeholder="Sin límite"><p class="hint">Déjalo vacío si no quieres ponerle límite.</p></div>
-    <div><span class="lab">Ícono</span><div class="icongrid" id="catIcons"></div></div>
+    <div><span class="lab">Ícono</span><input class="field" type="search" data-iconq="cat" id="cIconQ" placeholder="Buscar: perro, pizza, auto, gimnasio…" aria-label="Buscar ícono" style="margin-bottom:8px"><div class="icongrid" id="catIcons"></div><p class="hint">Hay más de 5,700 íconos: escribe lo que buscas.</p></div>
     <div><span class="lab">Color</span><div class="swatches" id="catColors"></div></div>
     <p class="err" id="cErr" role="alert"></p>
     <div style="display:flex;gap:10px">
@@ -334,7 +337,7 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
       <div><label class="lab" for="gSaved">Ya ahorrado</label><input class="field" id="gSaved" inputmode="decimal" placeholder="0.00"></div>
     </div>
     <div id="gAddWrap"><label class="lab" for="gAdd">Sumar un aporte</label><input class="field" id="gAdd" inputmode="decimal" placeholder="Ej. 100"><p class="hint">Se suma a lo que ya llevas ahorrado.</p></div>
-    <div><span class="lab">Ícono</span><div class="icongrid" id="goalIcons"></div></div>
+    <div><span class="lab">Ícono</span><input class="field" type="search" data-iconq="goal" id="gIconQ" placeholder="Buscar: perro, pizza, auto, gimnasio…" aria-label="Buscar ícono" style="margin-bottom:8px"><div class="icongrid" id="goalIcons"></div></div>
     <div><span class="lab">Color</span><div class="swatches" id="goalColors"></div></div>
     <p class="err" id="gErr" role="alert"></p>
     <div style="display:flex;gap:10px">
@@ -351,11 +354,15 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
       <h2 id="billTitle" style="margin:0;font-size:18px">Nuevo pago fijo</h2>
       <button type="button" class="btn btn-ghost iconbtn-round" aria-label="Cerrar" data-close="billScrim"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
-    <div><label class="lab" for="bName">Nombre</label><input class="field" id="bName" maxlength="28" placeholder="Alquiler"></div>
-    <div class="two">
-      <div><label class="lab" for="bAmount">Monto</label><input class="field" id="bAmount" inputmode="decimal" placeholder="800.00"></div>
-      <div><label class="lab" for="bDay">Día del mes</label><input class="field" id="bDay" inputmode="numeric" placeholder="1"></div>
-    </div>
+    <div><label class="lab" for="bName">Nombre</label><input class="field" id="bName" maxlength="28" placeholder="Pasajes, alquiler, internet…"></div>
+    <div><label class="lab" for="bAmount">Monto cada vez</label><input class="field" id="bAmount" inputmode="decimal" placeholder="25.00"></div>
+    <div><span class="lab">Se repite</span><div class="seg seg4" id="bFreq">
+      <button type="button" data-bfreq="weekly">Semanal</button><button type="button" data-bfreq="monthly">Mensual</button><button type="button" data-bfreq="yearly">Anual</button><button type="button" data-bfreq="once">Una vez</button>
+    </div></div>
+    <div id="bWeekly"><span class="lab">Qué días</span><div class="chips" id="bDays"></div><p class="hint">Puedes elegir varios días, por ejemplo lunes y jueves.</p></div>
+    <div id="bMonthly"><label class="lab" for="bDay">Día del mes</label><input class="field" id="bDay" inputmode="numeric" placeholder="5"><p class="hint">Si el mes no tiene ese día (como el 31), se usa el último día del mes.</p></div>
+    <div id="bDateWrap"><label class="lab" for="bDate" id="bDateLab">Fecha</label><input class="field" id="bDate" type="date"></div>
+    <div><span class="lab">Cómo se registra</span><div class="seg seg2" id="bMode"><button type="button" data-bmode="manual">Manual</button><button type="button" data-bmode="auto">Automático</button></div><p class="hint" id="bModeHint"></p></div>
     <div><span class="lab">Categoría</span><div class="chips" id="bCats"></div></div>
     <div><span class="lab">Se paga con</span><div class="chips" id="bAccs"></div></div>
     <p class="err" id="bErr" role="alert"></p>
@@ -371,7 +378,7 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-database-compat.js"></script>
-<script src="firebase-config.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="firebase-config.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
