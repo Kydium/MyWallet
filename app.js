@@ -259,14 +259,14 @@ function patch(obj) { return commit(obj); }
 function del(path) { var u = {}; u[path] = null; return commit(u); }
 function netBadge() {
   var el = $('net'); if (!el) return;
-  var n = outbox.length;
-  if (onlineKnown && !online) {
-    el.hidden = false;
-    el.innerHTML = svg('<path d="M3 3l18 18"/><path d="M9.5 5.5A7 7 0 0 1 19 11a4 4 0 0 1 1.7 7.3M17 17H7a5 5 0 0 1-1.6-9.7"/>', 18, 2) + '<span><b>Sin conexión.</b> ' + (n ? plural(n, 'cambio guardado', 'cambios guardados') + ' en este dispositivo; ' + (n === 1 ? 'se subirá' : 'se subirán') + ' cuando vuelva el internet.' : 'Puedes seguir usando la app; lo que registres se guarda aquí y se sube cuando vuelva el internet.') + '</span>';
-  } else if (n && onlineKnown) {
-    el.hidden = false;
-    el.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:3px" aria-hidden="true"></span><span>Sincronizando ' + plural(n, 'cambio', 'cambios') + '…</span>';
-  } else el.hidden = true;
+  var n = outbox.length, icon, color, label;
+  if (onlineKnown && !online) { icon = 'ti-cloud-off'; color = 'var(--red)'; label = 'Sin conexión' + (n ? ' · ' + plural(n, 'cambio guardado', 'cambios guardados') + ' en este dispositivo' : ''); }
+  else if (n) { icon = 'ti-cloud-upload'; color = 'var(--muted)'; label = 'Sincronizando ' + plural(n, 'cambio', 'cambios'); }
+  else { icon = 'ti-cloud-check'; color = 'var(--green)'; label = 'Conectado · todo guardado'; }
+  el.innerHTML = svg(icon, 22);
+  el.style.color = color;
+  el.title = label;
+  el.setAttribute('aria-label', label);
 }
 db.ref('.info/connected').on('value', function (snap) {
   online = !!snap.val();
@@ -900,6 +900,8 @@ function render() {
   var html = SUBVIEWS[v] ? viewCfgList(v) : v === 'movimientos' ? viewMovimientos() : v === 'billetera' ? viewCuentas() : v === 'presupuesto' ? viewPresupuesto() : v === 'estadisticas' ? viewEstadisticas() : v === 'personalizar' ? viewPersonalizar() : viewInicio();
   var active = document.activeElement && document.activeElement.id;
   $('view').innerHTML = html;
+  var h1 = document.querySelector('#view .top h1');
+  if (h1) { h1.style.display = 'flex'; h1.style.alignItems = 'center'; h1.style.gap = '8px'; h1.insertAdjacentHTML('beforeend', '<span id="net" class="net" role="status"></span>'); netBadge(); }
   var q = $('q');
   if (q) {
     q.addEventListener('input', function () { query = q.value; var pos = q.selectionStart; render(); var n = $('q'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } });
