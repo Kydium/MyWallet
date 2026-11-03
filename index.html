@@ -183,7 +183,12 @@ main{flex:1;min-width:0;padding:32px 32px 48px}
 .err{color:var(--red);font-size:13px;font-weight:600;min-height:18px;margin:0}
 .swatches{display:flex;gap:10px;flex-wrap:wrap}
 .swatch{width:36px;height:36px;border-radius:18px;border:3px solid transparent;box-shadow:inset 0 0 0 2px var(--bg)}
-.swatch[aria-pressed="true"]{border-color:var(--ink)}
+.swatch[aria-pressed="true"],.swcustom[data-on="true"]{border-color:var(--ink)}
+.swcustom{position:relative;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden}
+.swcustom input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0}
+.swplus{color:#fff;font-weight:800;font-size:20px;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.35);pointer-events:none}
+.pickico{position:relative;border:0;background:none;padding:0;display:inline-flex;flex-shrink:0;cursor:pointer}
+.pickbadge{position:absolute;right:-5px;bottom:-5px;width:20px;height:20px;border-radius:10px;background:var(--ink);color:var(--bg);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--surface)}
 .icongrid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;max-height:232px;overflow-y:auto;padding:2px;align-content:start}
 .icongrid button{aspect-ratio:1;border-radius:12px;border:2px solid transparent;background:var(--surface);display:flex;align-items:center;justify-content:center;color:var(--ink2);padding:0}
 .icongrid button[aria-pressed="true"]{border-color:var(--ink);color:var(--ink);background:var(--green-soft)}
@@ -410,6 +415,6 @@ html[data-theme="dark"] .balance{border:1px solid #2E333B}
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-database-compat.js"></script>
 <script src="firebase-config.js?v=10"></script>
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

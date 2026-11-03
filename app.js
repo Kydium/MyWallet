@@ -142,8 +142,9 @@ function isDark() { return document.documentElement.getAttribute('data-theme') =
 function hexRGB(h) { h = h.replace('#', ''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; }
 function hexA(h, a) { var c = hexRGB(h); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
 function mixHex(h, w, t) { var a = hexRGB(h), b = hexRGB(w); return '#' + a.map(function (v, i) { return ('0' + Math.round(v + (b[i] - v) * t).toString(16)).slice(-2); }).join(''); }
+function isHexColor(k) { return typeof k === 'string' && /^#[0-9a-f]{6}$/i.test(k); }
 function C(k) {
-  var c = COLORS[k] || COLORS.gris;
+  var c = COLORS[k] || (isHexColor(k) ? {soft:mixHex(k, '#ffffff', .86), ink:mixHex(k, '#000000', .38), dot:k} : COLORS.gris);
   if (!isDark()) return c;
   return {soft: hexA(c.dot, .2), ink: mixHex(c.dot, '#ffffff', .35), dot: c.dot};
 }
@@ -1358,7 +1359,25 @@ var tt;
 function toast(msg) { var t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(function () { t.classList.remove('on'); }, 2600); }
 function openSheet(id, focusId) { $(id).classList.add('on'); setTimeout(function () { var f = $(focusId); if (f && window.innerWidth > 760) f.focus(); }, 60); }
 function closeSheet(id) { $(id).classList.remove('on'); }
-function colorRow(sel) { return Object.keys(COLORS).map(function (k) { return '<button type="button" class="swatch" data-pick-color="' + k + '" aria-label="Color ' + k + '" aria-pressed="' + (k === sel) + '" style="background:' + COLORS[k].dot + '"></button>'; }).join(''); }
+function colorRow(sel) {
+  var custom = isHexColor(sel);
+  return Object.keys(COLORS).map(function (k) { return '<button type="button" class="swatch" data-pick-color="' + k + '" aria-label="Color ' + k + '" aria-pressed="' + (k === sel) + '" style="background:' + COLORS[k].dot + '"></button>'; }).join('') +
+    '<label class="swatch swcustom" data-on="' + custom + '" title="Elegir cualquier color" style="background:' + (custom ? sel : 'conic-gradient(#e0475b,#e0a92e,#2fa37a,#2e9c94,#4c8be8,#a47be0,#e0679a,#e0475b)') + '">' +
+    '<span class="swplus">' + (custom ? '' : '+') + '</span><input type="color" data-color-input value="' + (custom ? sel : '#2fa37a') + '" aria-label="Elegir cualquier color"></label>';
+}
+/* Selector de ícono: el ícono de la vista previa se toca para abrir el buscador. */
+var PICK = {editable:false, open:{}};
+function pickTile(kind, icon, color) {
+  var t = tile(icon, color, 44, 14);
+  if (!PICK.editable) return t;
+  return '<button type="button" class="pickico" data-icon-toggle="' + kind + '" aria-expanded="' + !!PICK.open[kind] + '" aria-label="Cambiar ícono">' + t + '<span class="pickbadge">' + svg(PICK.open[kind] ? 'ti-chevron-up' : 'ti-pencil', 12, 2.4) + '</span></button>';
+}
+function syncPick(kind) {
+  $(kind + 'Icons').parentNode.style.display = PICK.editable && PICK.open[kind] ? '' : 'none';
+  $(kind + 'Colors').parentNode.style.display = PICK.editable ? '' : 'none';
+}
+var KIND_PAINT = {acc:function () { paintAcc(); }, cat:function () { paintCat(); }, goal:function () { paintGoal(); }};
+function scrimKind(el) { var id = el.closest('.scrim').id; return id === 'accScrim' ? 'acc' : id === 'goalScrim' ? 'goal' : 'cat'; }
 
 /* ------------------------------------------------------------------ */
 /* ---------- Biblioteca de íconos (más de 5,700, con buscador en español) ---------- */
@@ -1519,22 +1538,19 @@ function paintAcc() {
   $('typeChips').innerHTML = Object.keys(TYPES).map(function (k) { return '<button type="button" class="chip" data-atype="' + k + '" aria-pressed="' + (k === A.type) + '"' + (used && k !== A.type ? ' disabled' : '') + '>' + svg(TYPES[k].icon, 14, 2) + TYPES[k].name + '</button>'; }).join('');
   $('typeHint').style.display = used ? '' : 'none';
   $('accIcons').innerHTML = iconGrid(A.icon, 'acc');
-  $('accColors').innerHTML = colorRow(A.color);
+  if (!PICK.live) $('accColors').innerHTML = colorRow(A.color); syncPick('acc');
   var cr = A.type === 'credito';
   $('creditFields').style.display = cr ? 'flex' : 'none';
   $('plainFields').style.display = cr ? 'none' : '';
   $('aName').placeholder = {efectivo:'Efectivo', digital:'Yape', banco:'Cuenta BCP', ahorros:'Ahorros Interbank', credito:'Visa Signature'}[A.type];
   var nm = $('aName').value.trim() || $('aName').placeholder;
-  $('accPreview').innerHTML = tile(A.icon, A.color, 44, 14) + '<div style="display:flex;flex-direction:column"><b>' + esc(nm) + '</b><span class="sub" style="font-size:12px">' + TYPES[A.type].name + '</span></div>';
+  $('accPreview').innerHTML = pickTile('acc', A.icon, A.color) + '<div style="display:flex;flex-direction:column"><b>' + esc(nm) + '</b><span class="sub" style="font-size:12px">' + TYPES[A.type].name + '</span></div>';
   $('accTitle').textContent = A.editId ? 'Editar cuenta' : 'Nueva cuenta';
   $('accSave').textContent = A.editId ? 'Guardar cambios' : 'Crear cuenta';
   $('accDelete').style.display = A.editId ? '' : 'none';
 }
 /* El ícono y el color solo se cambian desde Configuración. */
-function styleEditable(kind) {
-  var on = /^#cfg-/.test(location.hash);
-  [kind + 'Icons', kind + 'Colors'].forEach(function (id) { $(id).parentNode.style.display = on ? '' : 'none'; });
-}
+function styleEditable(kind) { PICK.editable = /^#cfg-/.test(location.hash); PICK.open[kind] = false; }
 function openAcc(editId) {
   var a = editId ? acc(editId) : null, bal = a ? balances()[a.id] : 0;
   A = {editId: a ? a.id : null, type: a ? a.type : 'banco', icon: a ? accIcon(a) : 'bank', color: a ? a.color : 'azul', iconTouched: !!a, order: a ? a.order : nextOrder(S.accounts), created: a ? (a.created || null) : Date.now(), fromTx: $('txScrim').classList.contains('on')};
@@ -1591,9 +1607,9 @@ $('accDelete').addEventListener('click', function () {
 var K = {};
 function paintCat() {
   $('catIcons').innerHTML = iconGrid(K.icon, 'cat');
-  $('catColors').innerHTML = colorRow(K.color);
+  if (!PICK.live) $('catColors').innerHTML = colorRow(K.color); syncPick('cat');
   var nm = $('cName').value.trim() || 'Mascotas';
-  $('catPreview').innerHTML = tile(K.icon, K.color, 44, 14) + '<div style="display:flex;flex-direction:column"><b>' + esc(nm) + '</b><span class="sub" style="font-size:12px">Así se verá en tus movimientos</span></div>';
+  $('catPreview').innerHTML = pickTile('cat', K.icon, K.color) + '<div style="display:flex;flex-direction:column"><b>' + esc(nm) + '</b><span class="sub" style="font-size:12px">Así se verá en tus movimientos</span></div>';
   $('catTitle').textContent = K.editId ? 'Editar categoría' : 'Nueva categoría';
   $('catSave').textContent = K.editId ? 'Guardar cambios' : 'Crear categoría';
   $('catDelete').style.display = K.editId ? '' : 'none';
@@ -1636,8 +1652,8 @@ $('catDelete').addEventListener('click', function () {
 var G = {};
 function paintGoal() {
   $('goalIcons').innerHTML = iconGrid(G.icon, 'goal');
-  $('goalColors').innerHTML = colorRow(G.color);
-  $('goalPreview').innerHTML = tile(G.icon, G.color, 44, 14) + '<div style="display:flex;flex-direction:column"><b>' + esc($('gName').value.trim() || 'Laptop nueva') + '</b><span class="sub" style="font-size:12px">Meta de ahorro</span></div>';
+  if (!PICK.live) $('goalColors').innerHTML = colorRow(G.color); syncPick('goal');
+  $('goalPreview').innerHTML = pickTile('goal', G.icon, G.color) + '<div style="display:flex;flex-direction:column"><b>' + esc($('gName').value.trim() || 'Laptop nueva') + '</b><span class="sub" style="font-size:12px">Meta de ahorro</span></div>';
   $('goalTitle').textContent = G.editId ? 'Editar meta' : 'Nueva meta';
   $('goalSave').textContent = G.editId ? 'Guardar cambios' : 'Crear meta';
   $('goalDelete').style.display = G.editId ? '' : 'none';
@@ -1765,7 +1781,8 @@ document.addEventListener('click', function (e) {
   if (d.atype) { A.type = d.atype; if (!A.iconTouched) A.icon = TYPES[A.type].icon; paintAcc(); return; }
   if (d.bcat) { B.cat = d.bcat; paintBill(); return; }
   if (d.bacc) { B.acc = d.bacc; paintBill(); return; }
-  if (d.pickIcon) { var s1 = t.closest('.scrim').id; if (s1 === 'accScrim') { A.icon = d.pickIcon; A.iconTouched = true; paintAcc(); } else if (s1 === 'goalScrim') { G.icon = d.pickIcon; paintGoal(); } else { K.icon = d.pickIcon; paintCat(); } return; }
+  if (d.iconToggle) { var ik = d.iconToggle; PICK.open[ik] = !PICK.open[ik]; KIND_PAINT[ik](); if (PICK.open[ik]) { var qi = $({acc:'aIconQ', cat:'cIconQ', goal:'gIconQ'}[ik]); qi.scrollIntoView({block:'nearest', behavior:'smooth'}); } return; }
+  if (d.pickIcon) { var s1 = t.closest('.scrim').id, pk = scrimKind(t); PICK.open[pk] = false; if (s1 === 'accScrim') { A.icon = d.pickIcon; A.iconTouched = true; paintAcc(); } else if (s1 === 'goalScrim') { G.icon = d.pickIcon; paintGoal(); } else { K.icon = d.pickIcon; paintCat(); } return; }
   if (d.pickColor) { var s2 = t.closest('.scrim').id; if (s2 === 'accScrim') { A.color = d.pickColor; paintAcc(); } else if (s2 === 'goalScrim') { G.color = d.pickColor; paintGoal(); } else { K.color = d.pickColor; paintCat(); } return; }
   if (d.month) { viewMonth = shiftMonth(viewMonth, +d.month); if (viewMonth > curYM()) viewMonth = curYM(); render(); return; }
   if (t.hasAttribute('data-ftoggle')) { filterOpen = !filterOpen; render(); return; }
@@ -1812,6 +1829,17 @@ $('cName').addEventListener('input', function () { $('cErr').textContent = ''; p
 $('cLimit').addEventListener('input', function () { $('cErr').textContent = ''; });
 $('gName').addEventListener('input', function () { $('gErr').textContent = ''; paintGoal(); });
 $('gAdd').addEventListener('input', function () { $('gErr').textContent = ''; paintGoalAcc(); });
+/* Color libre: mientras eliges se actualiza la vista previa; al confirmar se redibuja todo. */
+function onCustomColor(e, final) {
+  var el = e.target; if (!el.hasAttribute || !el.hasAttribute('data-color-input')) return;
+  var v = String(el.value || '').toLowerCase(); if (!isHexColor(v)) return;
+  var k = scrimKind(el); ({acc:A, cat:K, goal:G})[k].color = v;
+  var lab = el.parentNode; lab.style.background = v; lab.setAttribute('data-on', 'true'); lab.querySelector('.swplus').textContent = '';
+  lab.parentNode.querySelectorAll('.swatch[aria-pressed]').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+  PICK.live = !final; KIND_PAINT[k](); PICK.live = false;
+}
+document.addEventListener('input', function (e) { onCustomColor(e, false); });
+document.addEventListener('change', function (e) { onCustomColor(e, true); });
 ['gTarget', 'gSaved', 'gAdd'].forEach(function (id) { $(id).addEventListener('input', function () { $('gErr').textContent = ''; }); });
 ['bName', 'bAmount', 'bDay', 'bDate'].forEach(function (id) { $(id).addEventListener('input', function () { $('bErr').textContent = ''; }); });
 
