@@ -619,7 +619,7 @@ function txRow(t, withDay) {
   }
   if (t.cat === 'goal') {
     var gl = S.goals.filter(function (x) { return x.id === t.goal; })[0], gc = C(gl ? (gl.color || 'amarillo') : 'amarillo');
-    return '<div class="tx"><button class="rowbtn" ' + (gl && t.amount > 0 ? 'data-edit-goal="' + esc(gl.id) + '"' : 'data-edit-tx="' + esc(t.id) + '"') + ' aria-label="Ver la meta"><span class="ic" style="background:' + gc.soft + ';color:' + gc.ink + '">' + svg(gl ? (gl.icon || 'star') : 'star', 20) + '</span>' +
+    return '<div class="tx"><button class="rowbtn" ' + (gl && t.amount > 0 ? 'data-goal-info' : 'data-edit-tx="' + esc(t.id) + '"') + ' aria-label="Ver la meta"><span class="ic" style="background:' + gc.soft + ';color:' + gc.ink + '">' + svg(gl ? (gl.icon || 'star') : 'star', 20) + '</span>' +
       '<span class="t"><b>' + esc(t.desc) + '</b><span>Meta de ahorro · ' + esc(acc(t.acc).name) + (withDay ? ' · ' + shortDay(t.date) : '') + '</span></span><span class="amt" style="color:var(--muted)">' + signed(t.amount) + '</span></button></div>';
   }
   var c = cat(t.cat), a = acc(t.acc), isT = t.cat === 'transfer';
@@ -694,7 +694,7 @@ function viewCuentas() {
         (debt > 0 ? '<button class="btn btn-primary btn-sm" data-pay="' + esc(a.id) + '">Pagar tarjeta (' + money(debt) + ')</button>' : '<span class="sub" style="font-size:13px">No tienes deuda en esta tarjeta.</span>');
     } else body = '<b style="font-size:26px;letter-spacing:-.01em">' + (bal < 0 ? '−' : '') + money(bal) + '</b>';
     return '<div class="acccard"><div class="head">' + tile(accIcon(a), a.color, 40, 13) + '<div style="flex:1;min-width:0;display:flex;flex-direction:column"><b style="font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(a.name) + '</b><span class="typetag">' + (TYPES[a.type] || TYPES.efectivo).name + '</span></div>' +
-      '<button class="del" data-edit-acc="' + esc(a.id) + '" aria-label="Editar ' + esc(a.name) + '">' + svg(P.edit, 18) + '</button></div>' + body + '</div>';
+      '</div>' + body + '</div>';
   }).join('');
   return '<div class="top"><div><div class="sub">Tus cuentas, tarjetas y ahorros</div><h1>Mi billetera</h1></div>' + '<a class="btn btn-ghost btn-sm" href="#personalizar">' + svg(P.gear, 16, 2) + 'Configurar</a>' + '</div>' +
     '<div class="metrics"><div class="metric"><span class="sub" style="font-size:13px">Patrimonio neto</span><b>' + (s.net < 0 ? '−' : '') + money(s.net) + '</b></div><div class="metric"><span class="sub" style="font-size:13px">Tu dinero</span><b style="font-size:18px">' + money(s.cash) + '</b></div><div class="metric"><span class="sub" style="font-size:13px">Deuda en tarjetas</span><b style="font-size:18px;color:' + (s.debt > 0 ? 'var(--red)' : 'inherit') + '">' + money(s.debt) + '</b></div></div>' +
@@ -845,7 +845,7 @@ function viewEstadisticas() {
 function goalsCard() {
   var goals = S.goals.length ? S.goals.map(function (g) {
     var p = g.target ? Math.min(Math.round((g.saved || 0) / g.target * 100), 100) : 0, done = (g.saved || 0) >= g.target;
-    return '<div class="goal"><div style="display:flex;align-items:center;gap:10px">' + tile(g.icon || 'star', g.color || 'verde', 36, 12) + '<b style="flex:1;font-size:15px">' + esc(g.name) + '</b>' + (done ? '<span class="tag">' + svg(P.check, 14, 2.4) + 'Lograda</span>' : '<b style="color:var(--green);font-size:13px">' + p + '%</b>') + '<button class="del" data-edit-goal="' + esc(g.id) + '" aria-label="Editar ' + esc(g.name) + '">' + svg(P.edit, 18) + '</button></div>' +
+    return '<div class="goal"><div style="display:flex;align-items:center;gap:10px">' + tile(g.icon || 'star', g.color || 'verde', 36, 12) + '<b style="flex:1;font-size:15px">' + esc(g.name) + '</b>' + (done ? '<span class="tag">' + svg(P.check, 14, 2.4) + 'Lograda</span>' : '<b style="color:var(--green);font-size:13px">' + p + '%</b>') + '</div>' +
       '<div class="bar" style="height:8px"><div style="width:' + p + '%;background:' + C(g.color || 'verde').dot + '"></div></div><div class="row-between sub" style="font-size:12px"><span>' + money(g.saved || 0) + ' de ' + money(g.target) + '</span><span>' + (done ? '¡Felicidades!' : 'Faltan ' + money(g.target - (g.saved || 0))) + '</span></div></div>';
   }).join('') : '<p class="sub" style="margin:0 0 4px">Crea metas de ahorro (un viaje, una laptop, tu fondo de emergencia) en <a class="link" href="#personalizar">Configuración</a> y ve sumando tus aportes.</p>';
   return '<div class="card"><h2>Metas de ahorro</h2>' + goals + '</div>';
@@ -1046,6 +1046,8 @@ function viewPersonalizar() {
         '<label class="lab" for="sName">Cómo te saludamos</label><input class="field" id="sName" maxlength="20" value="' + esc(S.settings.name || '') + '" placeholder="Tu nombre">' +
         '<button class="btn btn-ghost btn-sm" data-logout style="margin-top:14px">' + svg(P.logout, 16, 2) + 'Cerrar sesión</button></div>' +
       '<div class="card"><h2>Instalar en este dispositivo</h2>' + install + '</div>' +
+      '<div class="card"><h2>Restablecer todo</h2><p class="sub" style="margin:0 0 12px;font-size:13px">Borra tus cuentas, tarjetas, movimientos, categorías, pagos fijos y metas para empezar de cero. No se puede deshacer.</p>' +
+        '<button class="btn btn-danger btn-sm" data-reset-open>' + svg('ti-trash', 16, 2) + 'Restablecer todo</button></div>' +
     '</div>' +
   '</div>';
 }
@@ -1447,6 +1449,36 @@ function repaintIcons(gridKey) {
 /* ------------------------------------------------------------------ */
 /* Formulario: movimiento                                              */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Restablecer todo                                                    */
+/* ------------------------------------------------------------------ */
+var RESET_WORD = 'RESTABLECER';
+function openReset() {
+  var n = S.tx.length;
+  $('resetModal').innerHTML = '<div class="scrim on" id="resetScrim" role="dialog" aria-modal="true" aria-labelledby="resetTitle"><form class="sheet" id="resetForm" novalidate>' +
+    '<div class="row-between" style="align-items:center"><h2 id="resetTitle" style="margin:0;font-size:18px">¿Restablecer todo?</h2><button type="button" class="btn btn-ghost iconbtn-round" aria-label="Cerrar" data-reset-close>' + svg('ti-x', 18, 2) + '</button></div>' +
+    '<div class="shdebt mine" style="display:block;font-size:14px;line-height:1.5"><b>Se borrará para siempre:</b><br>' +
+      plural(S.accounts.length, 'cuenta o tarjeta', 'cuentas y tarjetas') + ', ' + plural(n, 'movimiento', 'movimientos') + ', ' + plural(S.cats.length, 'categoría', 'categorías') + ', ' + plural(S.bills.length, 'pago fijo', 'pagos fijos') + ' y ' + plural(S.goals.length, 'meta', 'metas') + '.</div>' +
+    '<p class="sub" style="margin:0;font-size:13px">Se mantienen tu nombre, el tema, la moneda y tus cuentas compartidas.</p>' +
+    '<div><label class="lab" for="resetWord">Para confirmar, escribe <b>' + RESET_WORD + '</b></label><input class="field" id="resetWord" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' + RESET_WORD + '"></div>' +
+    '<p class="err" id="resetErr" role="alert"></p>' +
+    '<div style="display:flex;gap:10px"><button type="button" class="btn btn-ghost" data-reset-close style="height:54px;flex:1">Cancelar</button><button type="submit" class="btn btn-danger" id="resetGo" style="height:54px;flex:1" disabled>Borrar todo</button></div>' +
+    '</form></div>';
+  var w = $('resetWord');
+  w.addEventListener('input', function () { $('resetErr').textContent = ''; $('resetGo').disabled = w.value.trim().toUpperCase() !== RESET_WORD; });
+  $('resetScrim').addEventListener('click', function (e) { if (e.target.id === 'resetScrim') closeReset(); });
+  $('resetForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (w.value.trim().toUpperCase() !== RESET_WORD) { $('resetErr').textContent = 'Escribe ' + RESET_WORD + ' tal cual.'; return; }
+    closeReset();
+    patch({accounts:null, cats:null, tx:null, goals:null, bills:null});
+    toast('Listo, empezaste de cero');
+  });
+  setTimeout(function () { w.focus(); }, 60);
+}
+function closeReset() { $('resetModal').innerHTML = ''; }
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && $('resetScrim')) closeReset(); });
+
 var F = {};
 function goalById(id) { return S.goals.filter(function (g) { return g.id === id; })[0] || null; }
 /* Al crear, editar o borrar un aporte a una meta, ajusta lo ahorrado en la meta. */
@@ -1764,6 +1796,9 @@ document.addEventListener('click', function (e) {
   if (shClick(t, d)) return;
   if (t.hasAttribute('data-open-add')) { if (!S.accounts.length) { toast('Primero crea una cuenta en Configuración'); location.hash = 'personalizar'; return; } if (!S.cats.length) { toast('Primero crea una categoría en Configuración'); location.hash = 'personalizar'; return; } openTx(); return; }
   if (d.close) { closeSheet(d.close); return; }
+  if (t.hasAttribute('data-goal-info')) { toast('Para editar la meta, ve a Configuración → Metas de ahorro'); return; }
+  if (t.hasAttribute('data-reset-open')) { openReset(); return; }
+  if (t.hasAttribute('data-reset-close')) { closeReset(); return; }
   if (t.hasAttribute('data-open-acc')) { openAcc(); return; }
   if (t.hasAttribute('data-open-cat')) { openCat(null, d.openCat === 'fromtx'); return; }
   if (t.hasAttribute('data-open-goal')) { openGoal(); return; }
