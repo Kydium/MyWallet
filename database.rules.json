@@ -5,6 +5,29 @@
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid"
       }
+    },
+    "shared": {
+      "$sid": {
+        ".read": "auth != null && data.child('members').child(auth.uid).exists()",
+        ".write": "auth != null && !newData.exists() && data.child('meta/createdBy').val() === auth.uid",
+        "meta": {
+          ".write": "auth != null && (data.exists() ? root.child('shared').child($sid).child('members').child(auth.uid).exists() : newData.child('createdBy').val() === auth.uid)"
+        },
+        "members": {
+          "$member": {
+            ".write": "auth != null && ((auth.uid === $member && !newData.exists()) || root.child('shared').child($sid).child('meta/createdBy').val() === auth.uid || (auth.uid === $member && !root.child('shared').child($sid).child('meta').exists()) || (auth.uid === $member && newData.child('code').isString() && root.child('invites').child(newData.child('code').val()).child('sid').val() === $sid && root.child('invites').child(newData.child('code').val()).child('exp').val() > now))"
+          }
+        },
+        "movs": {
+          ".write": "auth != null && root.child('shared').child($sid).child('members').child(auth.uid).exists()"
+        }
+      }
+    },
+    "invites": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('by').val() === auth.uid)"
+      }
     }
   }
 }

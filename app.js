@@ -145,7 +145,7 @@ function C(k) {
   return {soft: hexA(c.dot, .2), ink: mixHex(c.dot, '#ffffff', .35), dot: c.dot};
 }
 function tile(iconKey, colorKey, size, r) { var c = C(colorKey); return '<span class="ico" style="background:' + c.soft + ';color:' + c.ink + (size ? ';width:' + size + 'px;height:' + size + 'px' : '') + (r ? ';border-radius:' + r + 'px' : '') + '">' + svg(iconKey, size ? Math.round(size / 2) : 16, 2) + '</span>'; }
-function cat(id) { if (id === 'ingreso') return INCOME; if (id === 'transfer') return TRANSFER; return S.cats.filter(function (c) { return c.id === id; })[0] || {id:id, name:'Sin categoría', color:'gris', icon:'dots', limit:0}; }
+function cat(id) { if (id === 'ingreso') return INCOME; if (id === 'transfer') return TRANSFER; if (id === 'shared') return SHARED_CAT; return S.cats.filter(function (c) { return c.id === id; })[0] || {id:id, name:'Sin categoría', color:'gris', icon:'dots', limit:0}; }
 function acc(id) { return S.accounts.filter(function (a) { return a.id === id; })[0] || {id:id, name:'Cuenta eliminada', type:'efectivo', color:'gris', icon:'cash', initial:0}; }
 function accIcon(a) { return a.icon || (TYPES[a.type] || TYPES.efectivo).icon; }
 function isCredit(a) { return a.type === 'credito'; }
@@ -219,17 +219,27 @@ function fail(e) {
    Cada cambio se aplica primero a LOCAL (se ve al instante y queda guardado aunque cierres la app)
    y se anota en una "bandeja de salida" que se envía a Firebase; cuando Firebase confirma, sale de la bandeja.
    Si no hay internet, la bandeja espera y se envía sola al volver la conexión, incluso si cerraste la app. */
-var LOCAL = null, outbox = [], online = true, onlineKnown = false;
-function cacheKey() { return 'mw-cache-' + (S.user ? S.user.uid : ''); }
-function outboxKey() { return 'mw-outbox-' + (S.user ? S.user.uid : ''); }
+var LOCAL = null, SHARED = {}, shRefs = {}, outbox = [], online = true, onlineKnown = false;
+function uidNow() { return S.user ? S.user.uid : ''; }
+function cacheKey() { return 'mw-cache-' + uidNow(); }
+function outboxKey() { return 'mw-outbox-' + uidNow(); }
+function sharedKey() { return 'mw-shared-' + uidNow(); }
 function loadLocal() {
   try { LOCAL = JSON.parse(localStorage.getItem(cacheKey()) || 'null'); } catch (e) { LOCAL = null; }
   try { outbox = JSON.parse(localStorage.getItem(outboxKey()) || '[]'); } catch (e) { outbox = []; }
+  try { SHARED = JSON.parse(localStorage.getItem(sharedKey()) || '{}') || {}; } catch (e) { SHARED = {}; }
   if (!Array.isArray(outbox)) outbox = [];
+  /* cambios guardados por versiones anteriores: rutas relativas a tu billetera */
+  outbox.forEach(function (it) { if (!it.abs) { it.upd = absPaths(it.upd); it.abs = true; } });
 }
 function saveLocal() { try { localStorage.setItem(cacheKey(), JSON.stringify(LOCAL)); } catch (e) {} }
 function saveOutbox() { try { localStorage.setItem(outboxKey(), JSON.stringify(outbox)); } catch (e) {} }
-function clearLocal() { try { localStorage.removeItem(cacheKey()); localStorage.removeItem(outboxKey()); } catch (e) {} LOCAL = null; outbox = []; }
+function saveShared() { try { localStorage.setItem(sharedKey(), JSON.stringify(SHARED)); } catch (e) {} }
+function clearLocal() {
+  try { localStorage.removeItem(cacheKey()); localStorage.removeItem(outboxKey()); localStorage.removeItem(sharedKey()); } catch (e) {}
+  Object.keys(shRefs).forEach(function (k) { shRefs[k].off(); }); shRefs = {};
+  LOCAL = null; outbox = []; SHARED = {};
+}
 function applyUpd(obj, upd) {
   Object.keys(upd).forEach(function (path) {
     var parts = path.split('/').filter(Boolean), o = obj;
@@ -238,25 +248,69 @@ function applyUpd(obj, upd) {
     if (v === null || v === undefined) delete o[k]; else o[k] = JSON.parse(JSON.stringify(v));
   });
 }
+function absPaths(upd) { var u = {}, bp = 'billetera/' + uidNow() + '/'; Object.keys(upd).forEach(function (k) { u[bp + k] = upd[k]; }); return u; }
+/* Aplica un cambio a la copia local: tu billetera (LOCAL) o una cuenta compartida (SHARED[sid]). onlySid limita a una cuenta. */
+function applyAbs(upd, onlySid) {
+  var bp = 'billetera/' + uidNow() + '/';
+  Object.keys(upd).forEach(function (path) {
+    var one = {};
+    if (path.indexOf(bp) === 0) { if (LOCAL && !onlySid) { one[path.slice(bp.length)] = upd[path]; applyUpd(LOCAL, one); } }
+    else if (path.indexOf('shared/') === 0) {
+      var rest = path.slice(7), i = rest.indexOf('/'), sid = i < 0 ? rest : rest.slice(0, i);
+      if (onlySid && sid !== onlySid) return;
+      if (i < 0) { if (upd[path] === null) delete SHARED[sid]; else SHARED[sid] = JSON.parse(JSON.stringify(upd[path])); }
+      else { if (!SHARED[sid]) SHARED[sid] = {}; one[rest.slice(i + 1)] = upd[path]; applyUpd(SHARED[sid], one); }
+    }
+  });
+}
 function refreshFromLocal() { if (!LOCAL) return; hydrate(JSON.parse(JSON.stringify(LOCAL))); render(); }
 function sendItem(item) {
-  if (!ref) return Promise.resolve();
-  return ref.update(item.upd).then(function () {
+  if (!S.user) return Promise.resolve();
+  return db.ref().update(item.upd).then(function () {
     outbox = outbox.filter(function (x) { return x.id !== item.id; }); saveOutbox(); netBadge();
   }).catch(function (e) {
     outbox = outbox.filter(function (x) { return x.id !== item.id; }); saveOutbox(); netBadge(); fail(e);
   });
 }
-function commit(upd) {
-  var item = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), upd: upd};
+function commitAbs(upd) {
+  var item = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), upd: upd, abs: true};
   outbox.push(item); saveOutbox();
-  if (LOCAL) { applyUpd(LOCAL, upd); saveLocal(); refreshFromLocal(); }
+  applyAbs(upd); saveLocal(); saveShared();
+  var p = sendItem(item);
+  syncSharedListeners();
+  if (LOCAL) refreshFromLocal();
   netBadge();
-  return sendItem(item);
+  return p;
 }
+function commit(upd) { return commitAbs(absPaths(upd)); }
 function put(path, obj) { var u = {}; u[path] = obj; return commit(u); }
 function patch(obj) { return commit(obj); }
 function del(path) { var u = {}; u[path] = null; return commit(u); }
+function globalId() { return db.ref().push().key; }
+
+/* Escucha cada cuenta compartida de la que eres miembro (billetera/{uid}/shared/{sid}). */
+function syncSharedListeners() {
+  if (!S.user) return;
+  var want = LOCAL && LOCAL.shared ? Object.keys(LOCAL.shared) : [];
+  Object.keys(shRefs).forEach(function (sid) { if (want.indexOf(sid) < 0) { shRefs[sid].off(); delete shRefs[sid]; } });
+  want.forEach(function (sid) {
+    if (shRefs[sid]) return;
+    var r = db.ref('shared/' + sid); shRefs[sid] = r;
+    r.on('value', function (snap) {
+      var v = snap.val();
+      if (v) { SHARED[sid] = v; outbox.forEach(function (it) { applyAbs(it.upd, sid); }); }
+      else if (!outbox.some(function (it) { return Object.keys(it.upd).some(function (k) { return k.indexOf('shared/' + sid) === 0; }); })) delete SHARED[sid];
+      saveShared(); refreshFromLocal(); runSharedApply();
+    }, function (err) {
+      console.warn('shared', sid, err && err.code);
+      r.off(); delete shRefs[sid];
+      var pending = outbox.some(function (it) { return Object.keys(it.upd).some(function (k) { return k.indexOf('shared/' + sid) === 0; }); });
+      if (pending) return;
+      delete SHARED[sid]; saveShared();
+      if (LOCAL && LOCAL.shared && LOCAL.shared[sid]) { del('shared/' + sid); toast('Ya no eres parte de una cuenta compartida'); }
+    });
+  });
+}
 function netBadge() {
   var el = $('net'); if (!el) return;
   var n = outbox.length, icon, color, label;
@@ -289,11 +343,11 @@ auth.getRedirectResult().catch(function (e) { loginError(e); });
 auth.onAuthStateChanged(function (u) {
   if (ref) { ref.off(); ref = null; }
   S.user = u;
-  if (!u) { LOCAL = null; outbox = []; applyAccent(); show('login'); return; }
+  if (!u) { Object.keys(shRefs).forEach(function (k) { shRefs[k].off(); }); shRefs = {}; LOCAL = null; outbox = []; SHARED = {}; applyAccent(); show('login'); return; }
   ref = db.ref('billetera/' + u.uid);
   loadLocal();
   if (LOCAL && LOCAL.meta) {
-    outbox.forEach(function (it) { applyUpd(LOCAL, it.upd); });
+    outbox.forEach(function (it) { applyAbs(it.upd); });
     show('app'); refreshFromLocal(); netBadge();
   } else {
     LOCAL = null;
@@ -301,16 +355,20 @@ auth.onAuthStateChanged(function (u) {
     show('loading');
   }
   outbox.slice().forEach(sendItem);
+  syncSharedListeners();
   ref.on('value', function (snap) {
     var v = snap.val();
     if (!v || !v.meta) { if (!outbox.length) seedUser(u); return; }
     LOCAL = v;
-    outbox.forEach(function (it) { applyUpd(LOCAL, it.upd); });
+    var bp = 'billetera/' + u.uid + '/';
+    outbox.forEach(function (it) { var one = {}; Object.keys(it.upd).forEach(function (k) { if (k.indexOf(bp) === 0) one[k.slice(bp.length)] = it.upd[k]; }); applyUpd(LOCAL, one); });
     saveLocal();
     show('app');
+    syncSharedListeners();
     refreshFromLocal();
     netBadge();
     runAuto();
+    runSharedApply();
   }, function (err) {
     console.error(err);
     $('loadingMsg').textContent = 'No se pudo abrir tu billetera (' + (err.code || err.message) + '). Revisa las reglas de la base de datos.';
@@ -347,6 +405,8 @@ function hydrate(v) {
     return b;
   });
   S.tx = toList(v.tx);
+  S.applied = v.sharedApplied || {};
+  S.shareds = Object.keys(v.shared || {}).map(function (sid) { return normShared(sid, SHARED[sid]); }).filter(Boolean);
 }
 
 function loginError(e) {
@@ -385,13 +445,13 @@ function balances() {
   return bal;
 }
 function monthExpense(m) {
-  return S.tx.reduce(function (s, t) { return t.date && t.date.slice(0, 7) === m && t.cat !== 'transfer' && t.amount < 0 ? s - t.amount : s; }, 0);
+  return S.tx.reduce(function (s, t) { return t.date && t.date.slice(0, 7) === m && t.cat !== 'transfer' && t.cat !== 'shared' && t.amount < 0 ? s - t.amount : s; }, 0);
 }
 function stats(m) {
   var inc = 0, exp = 0, byCat = {};
   S.cats.forEach(function (c) { byCat[c.id] = 0; });
   S.tx.forEach(function (t) {
-    if (!t.date || t.date.slice(0, 7) !== m || t.cat === 'transfer') return;
+    if (!t.date || t.date.slice(0, 7) !== m || t.cat === 'transfer' || t.cat === 'shared') return;
     if (t.amount > 0) inc += t.amount; else { exp -= t.amount; byCat[t.cat] = (byCat[t.cat] || 0) - t.amount; }
   });
   var bal = balances(), cash = 0, debt = 0;
@@ -406,6 +466,107 @@ function stats(m) {
 /* ------------------------------------------------------------------ */
 /* Navegación                                                          */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Cuentas compartidas (mancomunadas)                                  */
+/* shared/{sid}: meta {name, mode, pct{uid}, createdBy, created, invite}
+                 members {uid: {name, photo, joined, code}}
+                 movs {id: {type: aporte|gasto|saldo, by, to?, amount, desc?, cat?{name,icon,color}, paid?, accName?, date, created, ptx?}} */
+/* ------------------------------------------------------------------ */
+var SH_COLORS = ['verde', 'rosa', 'azul', 'naranja', 'morado', 'turquesa', 'amarillo', 'marino'];
+var SH_MODES = {mitad:{name:'Mitad y mitad', s:'Cada uno pone la misma parte'}, porcentaje:{name:'Por porcentaje', s:'Por ejemplo 60% y 40%'}, fondo:{name:'Solo un fondo común', s:'Sin llevar cuentas de quién debe a quién'}};
+var SHARED_CAT = {id:'shared', name:'Cuenta compartida', color:'turquesa', icon:'ti-users'};
+var selSh = null, pendingJoinCode = null;
+
+function normShared(sid, raw) {
+  if (!raw || !raw.meta) return null;
+  var members = Object.keys(raw.members || {}).map(function (uid) { var m = raw.members[uid] || {}; return {uid:uid, name:m.name || 'Miembro', photo:m.photo || '', joined:m.joined || 0}; })
+    .sort(function (a, b) { return a.joined - b.joined; });
+  members.forEach(function (m, i) { m.color = SH_COLORS[i % SH_COLORS.length]; });
+  var movs = Object.keys(raw.movs || {}).map(function (id) { var o = Object.assign({}, raw.movs[id]); o.id = id; return o; })
+    .sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : (b.created || 0) - (a.created || 0); });
+  var meta = Object.assign({mode:'mitad', pct:{}}, raw.meta);
+  return {id:sid, meta:meta, name:meta.name || 'Cuenta compartida', members:members, movs:movs};
+}
+function shById(sid) { return (S.shareds || []).filter(function (x) { return x.id === sid; })[0] || null; }
+function shMember(sh, uid) { return sh.members.filter(function (m) { return m.uid === uid; })[0] || {uid:uid, name:'Ex miembro', color:'gris', joined:0}; }
+function shWho(sh, uid) { return uid === uidNow() ? 'Tú' : shMember(sh, uid).name; }
+function shAv(sh, uid, size) {
+  var m = shMember(sh, uid), c = C(m.color), s = size || 32, ini = esc(((m.name || '?').trim()[0] || '?').toUpperCase());
+  return '<span class="avatar" style="width:' + s + 'px;height:' + s + 'px;border-radius:' + (s / 2) + 'px;background:' + c.soft + ';color:' + c.ink + ';font-size:' + Math.round(s * 0.4) + 'px">' + (m.photo ? '<img src="' + esc(m.photo) + '" alt="" referrerpolicy="no-referrer">' : ini) + '</span>';
+}
+function shFund(sh) { var f = 0; sh.movs.forEach(function (m) { if (m.type === 'aporte') f += m.amount; if (m.type === 'gasto' && m.paid === 'fondo') f -= m.amount; }); return round2(f); }
+function shTotals(sh) {
+  var ap = 0, g = 0; sh.movs.forEach(function (m) { if (m.type === 'aporte') ap += m.amount; if (m.type === 'gasto') g += m.amount; });
+  return {aportes:round2(ap), gastos:round2(g)};
+}
+function shMembersAt(sh, ts) { return sh.members.filter(function (m) { return (m.joined || 0) <= (ts || 0) + 1000; }).map(function (m) { return m.uid; }); }
+function shShareAt(sh, uid, list) {
+  if (list.indexOf(uid) < 0) return 0;
+  if (sh.meta.mode === 'porcentaje') {
+    var pct = sh.meta.pct || {}, all = list.every(function (u) { return pct[u] != null; });
+    var tot = list.reduce(function (a, u) { return a + (+pct[u] || 0); }, 0);
+    if (all && tot > 0) return (+pct[uid] || 0) / tot;
+  }
+  return 1 / list.length;
+}
+function shShareNow(sh, uid) { return shShareAt(sh, uid, sh.members.map(function (m) { return m.uid; })); }
+/* Quien se une después solo comparte lo que pasa desde que entró. */
+function shBalances(sh) {
+  var put = {}, exp = {}, diff = {};
+  sh.members.forEach(function (m) { put[m.uid] = 0; exp[m.uid] = 0; });
+  sh.movs.forEach(function (m) {
+    if (m.type === 'aporte' || (m.type === 'gasto' && m.paid === 'propia')) {
+      if (put[m.by] != null) put[m.by] += m.amount;
+      var list = shMembersAt(sh, m.created);
+      sh.members.forEach(function (x) { exp[x.uid] += m.amount * shShareAt(sh, x.uid, list); });
+    } else if (m.type === 'saldo') {
+      if (put[m.by] != null) put[m.by] += m.amount;
+      if (put[m.to] != null) put[m.to] -= m.amount;
+    }
+  });
+  sh.members.forEach(function (m) { put[m.uid] = round2(put[m.uid]); exp[m.uid] = round2(exp[m.uid]); diff[m.uid] = round2(put[m.uid] - exp[m.uid]); });
+  return {put:put, exp:exp, diff:diff};
+}
+function shDebts(sh) {
+  if (sh.meta.mode === 'fondo') return [];
+  var d = shBalances(sh).diff, pos = [], neg = [], out = [];
+  sh.members.forEach(function (m) { if (d[m.uid] > 0.004) pos.push({u:m.uid, v:d[m.uid]}); else if (d[m.uid] < -0.004) neg.push({u:m.uid, v:-d[m.uid]}); });
+  pos.sort(function (a, b) { return b.v - a.v; }); neg.sort(function (a, b) { return b.v - a.v; });
+  var i = 0, j = 0;
+  while (i < neg.length && j < pos.length) {
+    var x = Math.min(neg[i].v, pos[j].v);
+    out.push({from:neg[i].u, to:pos[j].u, amount:round2(x)});
+    neg[i].v -= x; pos[j].v -= x;
+    if (neg[i].v < 0.005) i++; if (pos[j].v < 0.005) j++;
+  }
+  return out;
+}
+function myShareValue(sh) { return round2(shFund(sh) * shShareNow(sh, uidNow())); }
+
+/* Cuando alguien te paga para quedar parejos, ese pago entra a tu primera cuenta (que no sea tarjeta). */
+var applyBusy = false;
+function runSharedApply() {
+  if (applyBusy || !S.user || !LOCAL) return;
+  var me = uidNow(), target = S.accounts.filter(function (a) { return !isCredit(a); })[0];
+  if (!target) return;
+  var upd = {}, n = 0;
+  (S.shareds || []).forEach(function (sh) {
+    sh.movs.forEach(function (m) {
+      if (m.type !== 'saldo' || m.to !== me) return;
+      var key = sh.id + '_' + m.id;
+      if (S.applied[key]) return;
+      upd['tx/' + globalId()] = {date:m.date, desc:'Pago de ' + shMember(sh, m.by).name + ' · ' + sh.name, cat:'shared', acc:target.id, amount:m.amount, created:Date.now() + n, shared:sh.id, smov:m.id};
+      upd['sharedApplied/' + key] = true;
+      n++;
+    });
+  });
+  if (!n) return;
+  applyBusy = true;
+  commit(upd);
+  applyBusy = false;
+  toast(n === 1 ? 'Recibiste un pago en una cuenta compartida' : 'Recibiste ' + n + ' pagos en cuentas compartidas');
+}
+
 var VIEWS = [
   {id:'inicio', name:'Inicio', icon:'home'},
   {id:'presupuesto', name:'Presupuesto', icon:P.target},
@@ -415,19 +576,19 @@ var VIEWS = [
   {id:'personalizar', name:'Configuración', icon:P.gear}
 ];
 var ALIAS = {cuentas:'billetera', reportes:'estadisticas', metas:'presupuesto', configuracion:'personalizar'};
-var SUBVIEWS = {'cfg-cuentas':1, 'cfg-categorias':1, 'cfg-pagos':1, 'cfg-metas':1};
+var SUBVIEWS = {'cfg-cuentas':1, 'cfg-categorias':1, 'cfg-pagos':1, 'cfg-metas':1, 'cfg-compartidas':1, 'compartida':1};
 function current() { var h = (location.hash || '').slice(1); h = ALIAS[h] || h; if (SUBVIEWS[h]) return h; return VIEWS.some(function (v) { return v.id === h; }) ? h : 'inicio'; }
 
 function renderNav() {
   var cur = current();
   $('sidenav').innerHTML = VIEWS.map(function (v) {
-    return '<a class="navlink" href="#' + v.id + '"' + (v.id === cur || (SUBVIEWS[cur] && v.id === 'personalizar') ? ' aria-current="page"' : '') + '>' + svg(v.icon, 20) + v.name + '</a>';
+    return '<a class="navlink" href="#' + v.id + '"' + (v.id === cur || (cur === 'compartida' ? v.id === 'billetera' : SUBVIEWS[cur] && v.id === 'personalizar') ? ' aria-current="page"' : '') + '>' + svg(v.icon, 20) + v.name + '</a>';
   }).join('');
   var mob = ['inicio', 'presupuesto', 'movimientos', 'estadisticas', 'billetera'], parent = {personalizar:'inicio'};
   var html = '<button class="fab" data-open-add aria-label="Agregar movimiento">' + svg(P.plus, 26, 2.2) + '</button>';
   mob.forEach(function (id) {
     var v = VIEWS.filter(function (x) { return x.id === id; })[0];
-    var on = id === cur || parent[cur] === id || (SUBVIEWS[cur] && id === 'inicio');
+    var on = id === cur || parent[cur] === id || (cur === 'compartida' ? id === 'billetera' : SUBVIEWS[cur] && id === 'inicio');
     html += '<a href="#' + id + '"' + (on ? ' aria-current="page"' : '') + '>' + svg(v.icon, 22) + (v.short || v.name) + '</a>';
   });
   $('bottomnav').innerHTML = html;
@@ -447,6 +608,11 @@ function monthNav() {
 /* Piezas de vista                                                     */
 /* ------------------------------------------------------------------ */
 function txRow(t, withDay) {
+  if (t.cat === 'shared') {
+    var sc = C(SHARED_CAT.color);
+    return '<div class="tx"><button class="rowbtn" data-open-shared="' + esc(t.shared || '') + '" aria-label="Ver la cuenta compartida"><span class="ic" style="background:' + sc.soft + ';color:' + sc.ink + '">' + svg(SHARED_CAT.icon, 20) + '</span>' +
+      '<span class="t"><b>' + esc(t.desc) + '</b><span>Cuenta compartida · ' + esc(acc(t.acc).name) + (withDay ? ' · ' + shortDay(t.date) : '') + '</span></span><span class="amt" style="color:var(--muted)">' + signed(t.amount) + '</span></button></div>';
+  }
   var c = cat(t.cat), a = acc(t.acc), isT = t.cat === 'transfer';
   var meta = isT ? a.name + ' → ' + acc(t.to).name : c.name + ' · ' + a.name;
   var amt = isT ? '<span class="amt" style="color:var(--muted)">' + money(t.amount) + '</span>' : '<span class="amt" style="' + (t.amount > 0 ? 'color:var(--green)' : '') + '">' + signed(t.amount) + '</span>';
@@ -523,7 +689,7 @@ function viewCuentas() {
   }).join('');
   return '<div class="top"><div><div class="sub">Tus cuentas, tarjetas y ahorros</div><h1>Mi billetera</h1></div>' + '<a class="btn btn-ghost btn-sm" href="#personalizar">' + svg(P.gear, 16, 2) + 'Configurar</a>' + '</div>' +
     '<div class="metrics"><div class="metric"><span class="sub" style="font-size:13px">Patrimonio neto</span><b>' + (s.net < 0 ? '−' : '') + money(s.net) + '</b></div><div class="metric"><span class="sub" style="font-size:13px">Tu dinero</span><b style="font-size:18px">' + money(s.cash) + '</b></div><div class="metric"><span class="sub" style="font-size:13px">Deuda en tarjetas</span><b style="font-size:18px;color:' + (s.debt > 0 ? 'var(--red)' : 'inherit') + '">' + money(s.debt) + '</b></div></div>' +
-    '<div class="accgrid">' + cards + '</div>' + goalsCard();
+    '<div class="accgrid">' + cards + '</div>' + sharedCards() + goalsCard();
 }
 
 function filterCount() { return (fKind !== 'todos' ? 1 : 0) + fAccs.length + fCats.length; }
@@ -532,8 +698,8 @@ function viewMovimientos() {
   fCats = fCats.filter(function (id) { return S.cats.some(function (c) { return c.id === id; }); });
   var inMonth = S.tx.filter(function (t) { return t.date && t.date.slice(0, 7) === viewMonth; });
   var list = sortedTx(inMonth).filter(function (t) {
-    if (fKind === 'gastos' && !(t.amount < 0 && t.cat !== 'transfer')) return false;
-    if (fKind === 'ingresos' && !(t.amount > 0 && t.cat !== 'transfer')) return false;
+    if (fKind === 'gastos' && !(t.amount < 0 && t.cat !== 'transfer' && t.cat !== 'shared')) return false;
+    if (fKind === 'ingresos' && !(t.amount > 0 && t.cat !== 'transfer' && t.cat !== 'shared')) return false;
     if (fKind === 'transfer' && t.cat !== 'transfer') return false;
     if (fAccs.length && fAccs.indexOf(t.acc) < 0 && fAccs.indexOf(t.to) < 0) return false;
     if (fCats.length && fCats.indexOf(t.cat) < 0) return false;
@@ -554,7 +720,7 @@ function viewMovimientos() {
   var body;
   if (order.length) {
     body = order.map(function (d) {
-      var sum = groups[d].reduce(function (s, t) { return t.cat === 'transfer' ? s : s + t.amount; }, 0);
+      var sum = groups[d].reduce(function (s, t) { return t.cat === 'transfer' || t.cat === 'shared' ? s : s + t.amount; }, 0);
       return '<div class="daylbl"><span>' + dayLabel(d) + '</span><span style="' + (sum > 0 ? 'color:var(--green)' : '') + '">' + (sum === 0 ? '' : signed(sum)) + '</span></div><div class="card" style="padding:0 16px">' + groups[d].map(function (t) { return txRow(t, false); }).join('') + '</div>';
     }).join('');
   } else if (inMonth.length) {
@@ -595,7 +761,7 @@ function viewPresupuesto() {
 
 function viewEstadisticas() {
   var s = stats(viewMonth), a0 = 0;
-  var mtx = S.tx.filter(function (t) { return t.date && t.date.slice(0, 7) === viewMonth && t.cat !== 'transfer'; });
+  var mtx = S.tx.filter(function (t) { return t.date && t.date.slice(0, 7) === viewMonth && t.cat !== 'transfer' && t.cat !== 'shared'; });
   var exps = mtx.filter(function (t) { return t.amount < 0; });
   var stops = s.exp ? S.cats.map(function (c) { var p = (s.byCat[c.id] || 0) / s.exp * 100; var a = a0; a0 += p; return C(c.color).dot + ' ' + a.toFixed(2) + '% ' + a0.toFixed(2) + '%'; }).join(',') : 'var(--empty) 0 100%';
   var saved = s.inc - s.exp, rate = s.inc ? Math.round(saved / s.inc * 100) : null;
@@ -620,7 +786,7 @@ function viewEstadisticas() {
   // Ingresos vs gastos, últimos 6 meses
   var six = [-5, -4, -3, -2, -1, 0].map(function (k) {
     var m = shiftMonth(viewMonth, k), inc = 0, exp = 0;
-    S.tx.forEach(function (t) { if (!t.date || t.date.slice(0, 7) !== m || t.cat === 'transfer') return; if (t.amount > 0) inc += t.amount; else exp -= t.amount; });
+    S.tx.forEach(function (t) { if (!t.date || t.date.slice(0, 7) !== m || t.cat === 'transfer' || t.cat === 'shared') return; if (t.amount > 0) inc += t.amount; else exp -= t.amount; });
     return {m:m, inc:inc, exp:exp};
   });
   var max6 = Math.max.apply(null, six.map(function (x) { return Math.max(x.inc, x.exp); })) || 1;
@@ -817,6 +983,7 @@ function runAuto() {
 }
 
 function cfgData(kind) {
+  if (kind === 'cfg-compartidas') return {title:'Cuentas compartidas', icon:'ti-users', color:'rosa', count:(S.shareds || []).length, one:'cuenta compartida', many:'cuentas compartidas'};
   var used = {}; S.tx.forEach(function (t) { used[t.cat] = (used[t.cat] || 0) + 1; });
   var bal = balances();
   function editBtn(attr, id, name) { return '<button class="del" ' + attr + '="' + esc(id) + '" aria-label="Editar ' + esc(name) + '">' + svg(P.edit, 18) + '</button>'; }
@@ -851,7 +1018,7 @@ function viewPersonalizar() {
     : ios ? '<p class="sub" style="margin:0;font-size:13px">En iPhone: toca Compartir y luego "Agregar a pantalla de inicio".</p>'
     : '<p class="sub" style="margin:0;font-size:13px">Abre el menú del navegador (⋮) y elige "Instalar app" o "Agregar a la pantalla de inicio".</p>';
   var theme = S.settings.theme || 'auto';
-  var menu = ['cfg-cuentas', 'cfg-categorias', 'cfg-pagos', 'cfg-metas'].map(function (k) {
+  var menu = ['cfg-cuentas', 'cfg-compartidas', 'cfg-categorias', 'cfg-pagos', 'cfg-metas'].map(function (k) {
     var d = cfgData(k);
     return '<a class="setrow menurow" href="#' + k + '">' + tile(d.icon, d.color, 40, 13) + '<span class="t"><b>' + d.title + '</b><span>' + (d.count ? plural(d.count, d.one, d.many) : 'Sin ' + d.many + ' todavía') + '</span></span>' + svg(P.right, 20, 2) + '</a>';
   }).join('');
@@ -877,6 +1044,273 @@ function viewPersonalizar() {
 /* ------------------------------------------------------------------ */
 /* Render                                                              */
 /* ------------------------------------------------------------------ */
+/* ---------- Cuentas compartidas: pantallas ---------- */
+var I_SH = {
+  in:'<path d="M12 19V5M5 12l7-7 7 7"/>', swap:'<path d="M4 8h14l-3-3M20 16H6l3 3"/>', trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  share:'<path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/>', key:'<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3M17 6l3 3M15 8l2 2"/>'
+};
+function sharedCards() {
+  if (!(S.shareds || []).length) return '';
+  var me = uidNow();
+  return '<div class="row-between" style="margin-top:4px"><b style="font-size:15px">Compartidas</b><a class="link" href="#cfg-compartidas">Administrar</a></div><div class="accgrid">' +
+    S.shareds.map(function (sh) {
+      var ds = shDebts(sh), owe = ds.filter(function (d) { return d.from === me; }), owed = ds.filter(function (d) { return d.to === me; }), pill = '';
+      if (owe.length) pill = '<span class="shpill" style="color:var(--debt)">Debes ' + money(owe.reduce(function (a, d) { return a + d.amount; }, 0)) + '</span>';
+      else if (owed.length) pill = '<span class="shpill" style="color:var(--mint)">Te deben ' + money(owed.reduce(function (a, d) { return a + d.amount; }, 0)) + '</span>';
+      return '<button class="shcard" data-open-shared="' + esc(sh.id) + '"><div class="row-between" style="align-items:center;width:100%"><span style="display:flex;align-items:center;gap:12px;min-width:0"><span class="ico" style="width:40px;height:40px;border-radius:13px;background:var(--dark2);color:var(--mint)">' + svg('ti-users', 20) + '</span><span style="display:flex;flex-direction:column;gap:2px;min-width:0;text-align:left"><b style="font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(sh.name) + '</b><span style="font-size:12px;color:var(--dark-muted)">' + plural(sh.members.length, 'persona', 'personas') + ' · ' + SH_MODES[sh.meta.mode].name.toLowerCase() + '</span></span></span>' +
+        '<span class="avs">' + sh.members.slice(0, 4).map(function (m) { return shAv(sh, m.uid, 28); }).join('') + '</span></div>' +
+        '<div class="row-between" style="align-items:flex-end;width:100%;flex-wrap:wrap"><span style="display:flex;flex-direction:column;gap:2px;text-align:left"><span style="font-size:12px;color:var(--dark-muted)">Saldo del fondo</span><b style="font-size:24px;letter-spacing:-.02em">' + money(shFund(sh)) + '</b></span>' + pill + '</div></button>';
+    }).join('') + '</div>';
+}
+
+function viewCompartida() {
+  var sh = shById(selSh) || (S.shareds || [])[0];
+  if (!sh) return '<div class="top"><div><a class="link" href="#billetera" style="display:inline-flex;align-items:center;gap:4px;font-size:14px">' + svg(P.left, 16, 2.2) + 'Mi billetera</a><h1>Cuentas compartidas</h1></div></div>' +
+    emptyBox('ti-users', 'Todavía no tienes cuentas compartidas', 'Créalas o únete a una con un código desde Configuración.', '<a class="btn btn-primary" href="#cfg-compartidas" style="margin-top:6px">Ir a Configuración</a>');
+  selSh = sh.id;
+  var me = uidNow(), f = shFund(sh), t = shTotals(sh), b = shBalances(sh), ds = shDebts(sh), mode = sh.meta.mode;
+  var hero = '<div class="balance"><div class="row-between" style="align-items:center"><span style="display:flex;align-items:center;gap:12px;min-width:0"><span class="ico" style="width:42px;height:42px;border-radius:14px;background:var(--dark2);color:var(--mint)">' + svg('ti-users', 22) + '</span><span style="display:flex;flex-direction:column;gap:2px"><b>' + esc(sh.name) + '</b><span class="lbl">' + SH_MODES[mode].name + ' · ' + plural(sh.members.length, 'persona', 'personas') + '</span></span></span><span class="avs">' + sh.members.slice(0, 5).map(function (m) { return shAv(sh, m.uid, 30); }).join('') + '</span></div>' +
+    '<div style="display:flex;flex-direction:column;gap:4px"><span class="lbl">Saldo del fondo común</span><span class="big">' + (f < 0 ? '−' : '') + money(f) + '</span><span class="lbl">Tu parte: ' + money(myShareValue(sh)) + '</span></div>' +
+    '<div class="duo"><div><span class="lbl" style="font-size:12px">Aportes</span><b style="color:var(--mint);font-size:15px">+' + money(t.aportes) + '</b></div><div><span class="lbl" style="font-size:12px">Gastos compartidos</span><b style="font-size:15px">−' + money(t.gastos) + '</b></div></div>' +
+    '<div class="duo"><button class="btn btn-primary" data-sh-open="gasto">' + svg(P.plus, 18, 2.4) + 'Registrar gasto</button><button class="btn" style="background:var(--dark2);color:#fff" data-sh-open="aporte">' + svg(I_SH.in, 18, 2.2) + 'Poner aporte</button></div></div>';
+
+  var whoCard;
+  if (mode === 'fondo') {
+    whoCard = '<div class="card"><h2>Quién puso cuánto</h2>' + sh.members.map(function (m) { return '<div class="setrow">' + shAv(sh, m.uid) + '<span class="t"><b>' + esc(shWho(sh, m.uid)) + '</b></span><b>' + money(b.put[m.uid] || 0) + '</b></div>'; }).join('') +
+      '<p class="hint">En "Solo un fondo común" no se calcula quién debe a quién: todos ponen y gastan del mismo fondo.</p></div>';
+  } else {
+    var maxV = Math.max.apply(null, sh.members.map(function (m) { return Math.max(b.put[m.uid] || 0, b.exp[m.uid] || 0); }).concat([1]));
+    whoCard = '<div class="card"><div class="row-between"><h2>Quién puso cuánto</h2><span class="sub" style="font-size:12px">' + SH_MODES[mode].name + '</span></div><div style="display:flex;flex-direction:column;gap:14px">' +
+      sh.members.map(function (m) {
+        var put = b.put[m.uid] || 0;
+        return '<div style="display:flex;gap:10px;align-items:flex-start">' + shAv(sh, m.uid) + '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px"><div class="row-between"><b style="font-size:14px">' + esc(shWho(sh, m.uid)) + '</b><b style="font-size:14px">' + money(put) + '</b></div>' +
+          '<div class="bar" style="height:8px"><div style="width:' + Math.min(100, Math.round(put / maxV * 100)) + '%;background:' + C(m.color).dot + '"></div></div>' +
+          '<span class="sub" style="font-size:12px">Le toca ' + money(b.exp[m.uid] || 0) + ' (' + Math.round(shShareNow(sh, m.uid) * 100) + '%)</span></div></div>';
+      }).join('') + '</div><div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">' +
+      (ds.length ? ds.map(function (d) {
+        var mine = d.from === me, forMe = d.to === me;
+        var txt = mine ? '<span><b>Le debes ' + money(d.amount) + ' a ' + esc(shMember(sh, d.to).name) + '</b> para quedar parejos</span>' : forMe ? '<span><b>' + esc(shMember(sh, d.from).name) + ' te debe ' + money(d.amount) + '</b> para quedar parejos</span>' : '<span><b>' + esc(shMember(sh, d.from).name) + ' le debe ' + money(d.amount) + ' a ' + esc(shMember(sh, d.to).name) + '</b></span>';
+        return '<div class="shdebt' + (mine ? ' mine' : '') + '">' + txt + (mine ? '<button class="btn btn-primary btn-sm" data-sh-settle="' + esc(d.to) + '|' + d.amount + '">Pagar ahora</button>' : '') + '</div>';
+      }).join('') : '<div class="shdebt">' + svg(P.check, 16, 2.4) + '<span><b>Están parejos.</b> Nadie le debe a nadie.</span></div>') + '</div></div>';
+  }
+
+  var movs = '<div class="card" style="padding-top:6px;padding-bottom:6px"><div class="row-between" style="padding-top:12px"><h2 style="margin:0">Movimientos</h2><span class="sub" style="font-size:12px">Los ven todos los miembros</span></div>' +
+    (sh.movs.length ? sh.movs.map(function (m) {
+      var icon, title, meta, amt, col = '', mineM = m.by === me;
+      if (m.type === 'aporte') { icon = shAv(sh, m.by, 38); title = mineM ? 'Tu aporte' : 'Aporte de ' + shMember(sh, m.by).name; meta = (m.accName ? 'Desde ' + (mineM ? 'tu ' : 'su ') + m.accName + ' · ' : '') + shortDay(m.date); amt = '+' + money(m.amount); col = 'color:var(--green)'; }
+      else if (m.type === 'saldo') { icon = '<span class="ic" style="background:var(--soft);color:var(--ink2)">' + svg(I_SH.swap, 18) + '</span>'; title = mineM ? 'Le pagaste a ' + shMember(sh, m.to).name : m.to === me ? shMember(sh, m.by).name + ' te pagó' : shMember(sh, m.by).name + ' le pagó a ' + shMember(sh, m.to).name; meta = 'Para quedar parejos · ' + shortDay(m.date); amt = money(m.amount); col = 'color:var(--muted)'; }
+      else { var c = m.cat || {name:'Otros', icon:'dots', color:'gris'}, cc = C(c.color); icon = '<span class="ic" style="background:' + cc.soft + ';color:' + cc.ink + '">' + svg(c.icon, 18) + '</span>'; title = m.desc; meta = c.name + ' · ' + (m.paid === 'fondo' ? 'del fondo' : (mineM ? 'lo pagaste con tu ' : 'lo pagó ' + shMember(sh, m.by).name + ' con su ') + (m.accName || 'plata')) + ' · ' + (mineM ? 'lo registraste' : 'registró ' + shMember(sh, m.by).name) + ' · ' + shortDay(m.date); amt = '−' + money(m.amount); }
+      return '<div class="setrow" style="gap:12px">' + icon + '<span class="t"><b>' + esc(title) + '</b><span style="white-space:normal">' + esc(meta) + '</span></span><span class="amt" style="' + col + '">' + amt + '</span>' +
+        (mineM ? '<button class="del" data-sh-del="' + esc(m.id) + '" aria-label="Borrar ' + esc(title) + '">' + svg(I_SH.trash, 17, 1.9) + '</button>' : '<span class="del" title="Solo quien lo registró puede borrarlo" style="cursor:default;opacity:.35">' + svg(I_SH.lock, 16, 1.9) + '</span>') + '</div>';
+    }).join('') : '<p class="sub" style="padding:8px 0 14px;margin:0">Todavía no hay movimientos. Empiecen poniendo un aporte al fondo.</p>') + '</div>';
+
+  var tabs = S.shareds.length > 1 ? '<div class="chips">' + S.shareds.map(function (x) { return '<button class="chip" data-open-shared="' + esc(x.id) + '" aria-pressed="' + (x.id === sh.id) + '">' + esc(x.name) + '</button>'; }).join('') + '</div>' : '';
+  return '<div class="top"><div><a class="link" href="#billetera" style="display:inline-flex;align-items:center;gap:4px;font-size:14px">' + svg(P.left, 16, 2.2) + 'Mi billetera</a><h1>' + esc(sh.name) + '</h1></div><a class="btn btn-ghost btn-sm" href="#cfg-compartidas">' + svg(P.gear, 16, 2) + 'Configurar</a></div>' + tabs +
+    '<div class="grid"><div class="c6" style="display:flex;flex-direction:column;gap:16px">' + hero + whoCard + '</div><div class="c6">' + movs + '</div></div>';
+}
+
+function viewCfgCompartidas() {
+  var me = uidNow();
+  var list = (S.shareds || []).map(function (sh) {
+    var isOwner = sh.meta.createdBy === me, mode = sh.meta.mode, inv = sh.meta.invite || null;
+    var pct = mode === 'porcentaje' ? '<div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">' + sh.members.map(function (m) {
+        var v = sh.meta.pct && sh.meta.pct[m.uid] != null ? sh.meta.pct[m.uid] : Math.round(100 / sh.members.length);
+        return '<div style="display:flex;align-items:center;gap:10px">' + shAv(sh, m.uid, 28) + '<label for="pct-' + esc(sh.id) + '-' + esc(m.uid) + '" style="width:70px;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(shWho(sh, m.uid)) + '</label><input type="range" id="pct-' + esc(sh.id) + '-' + esc(m.uid) + '" data-sh-pct="' + esc(sh.id) + '|' + esc(m.uid) + '" min="0" max="100" step="5" value="' + v + '" style="flex:1;accent-color:var(--green)"><b style="width:44px;text-align:right">' + v + '%</b></div>';
+      }).join('') + (function () { var tot = sh.members.reduce(function (a, m) { return a + (+(sh.meta.pct || {})[m.uid] || 0); }, 0); return tot !== 100 ? '<p class="err" style="margin:0">Los porcentajes suman ' + tot + '%; deben sumar 100%. Mientras tanto se reparte en partes iguales.</p>' : ''; })() + '</div>' : '';
+    return '<div class="card" style="display:flex;flex-direction:column;gap:14px">' +
+      '<div class="row-between" style="align-items:center"><span style="display:flex;align-items:center;gap:12px;min-width:0">' + tile('ti-users', 'turquesa', 40, 13) + '<span class="t"><b>' + esc(sh.name) + '</b><span>' + plural(sh.members.length, 'persona', 'personas') + (isOwner ? ' · la creaste tú' : '') + '</span></span></span><button class="btn btn-ghost btn-sm" data-open-shared="' + esc(sh.id) + '">Abrir</button></div>' +
+      '<div><label class="lab" for="shname-' + esc(sh.id) + '">Nombre</label><input class="field" id="shname-' + esc(sh.id) + '" data-sh-name="' + esc(sh.id) + '" maxlength="28" value="' + esc(sh.name) + '"></div>' +
+      '<div><span class="lab">Cómo se reparten los gastos</span><div style="display:flex;flex-direction:column;gap:8px">' + Object.keys(SH_MODES).map(function (k) { return '<button class="opt" data-sh-mode="' + esc(sh.id) + '|' + k + '" aria-pressed="' + (mode === k) + '"><span class="dot"></span><span><b>' + SH_MODES[k].name + '</b><span class="s">' + SH_MODES[k].s + '</span></span></button>'; }).join('') + '</div>' + pct + '</div>' +
+      '<div><span class="lab">Miembros</span>' + sh.members.map(function (m) { return '<div class="setrow">' + shAv(sh, m.uid) + '<span class="t"><b>' + esc(shWho(sh, m.uid)) + '</b><span>' + (m.uid === sh.meta.createdBy ? 'Creó la cuenta' : 'Se unió el ' + dLabel(new Date(m.joined))) + '</span></span>' + (isOwner && m.uid !== me ? '<button class="btn btn-ghost btn-sm" data-sh-remove="' + esc(sh.id) + '|' + esc(m.uid) + '">Quitar</button>' : '') + '</div>'; }).join('') + '</div>' +
+      '<div><span class="lab">Invitar a alguien</span>' +
+        (inv && inv.exp > Date.now() ? '<div class="shcode" aria-label="Código de invitación">' + esc(fmtCode(inv.code)) + '</div><div class="two" style="margin-top:8px"><button class="btn btn-ghost btn-sm" data-sh-copy="' + esc(inv.code) + '">' + svg(I_SH.copy, 16) + 'Copiar enlace</button><button class="btn btn-primary btn-sm" data-sh-sharelink="' + esc(inv.code) + '|' + esc(sh.name) + '">' + svg(I_SH.share, 16) + 'Compartir</button></div><p class="hint">Vence el ' + dLabel(new Date(inv.exp)) + '. La otra persona entra a My Wallet con su Google, va a Configuración → Cuentas compartidas → Unirme, y escribe el código. O abre el enlace.</p><button class="link" data-sh-invite="' + esc(sh.id) + '" style="margin-top:6px">Generar otro código</button>'
+          : '<button class="btn btn-dark btn-sm" data-sh-invite="' + esc(sh.id) + '">' + svg(I_SH.key, 16) + 'Generar código de invitación</button><p class="hint">El código sirve por 7 días.</p>') + '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + (isOwner ? '<button class="btn btn-danger btn-sm" data-sh-delete="' + esc(sh.id) + '">Eliminar cuenta compartida</button>' : '<button class="btn btn-danger btn-sm" data-sh-leave="' + esc(sh.id) + '">Salir de esta cuenta</button>') + '</div>' +
+    '</div>';
+  }).join('');
+  return '<div class="top"><div><a class="link" href="#personalizar" style="display:inline-flex;align-items:center;gap:4px;font-size:14px">' + svg(P.left, 16, 2.2) + 'Configuración</a><h1>Cuentas compartidas</h1></div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" data-sh-open="unirse">' + svg(I_SH.key, 18, 2) + 'Unirme con un código</button><button class="btn btn-dark" data-sh-open="crear">' + svg(P.plus, 18, 2.2) + 'Crear cuenta compartida</button></div></div>' +
+    (list || '<div class="card"><p class="sub" style="margin:0;line-height:1.5">Una cuenta compartida (mancomunada) es un fondo que manejas con otra persona: los dos ponen aportes, registran gastos y la app calcula quién le debe a quién. Solo comparten esa cuenta; nadie ve tus otras cuentas ni tus gastos personales.</p></div>') +
+    '<div class="card" style="display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--ink2);line-height:1.45">' + svg(I_SH.lock, 16) + '<span>Solo los miembros pueden ver una cuenta compartida. Las reglas de Firebase no dejan entrar a nadie más.</span></div>';
+}
+function fmtCode(c) { return String(c).slice(0, 3) + '-' + String(c).slice(3); }
+
+/* ---------- Cuentas compartidas: formularios ---------- */
+var SM = null;
+function openSh(kind, data) {
+  SM = Object.assign({kind:kind}, data || {});
+  var own = S.accounts.filter(function (a) { return !isCredit(a); });
+  if (!SM.acc) SM.acc = (kind === 'gasto' ? S.accounts[0] : own[0] || S.accounts[0] || {}).id;
+  if (kind === 'gasto') { SM.paid = SM.paid || 'fondo'; SM.cat = SM.cat || (S.cats[0] && S.cats[0].id); }
+  if (kind === 'crear') { SM.mode = SM.mode || 'mitad'; }
+  paintSh();
+  setTimeout(function () { var a = $('smAmount') || $('smName') || $('smCode'); if (a && window.innerWidth > 760) a.focus(); }, 40);
+}
+function closeSh() { SM = null; paintSh(); }
+function keepSh() { ['smAmount', 'smDesc', 'smName', 'smCode'].forEach(function (id) { var el = $(id); if (el) SM[id] = el.value; }); SM.err = ''; }
+function smAccChips(label, list) {
+  return '<div><span class="lab">' + label + '</span><div class="chips">' + list.map(function (a) { var bal = balances()[a.id]; return '<button type="button" class="chip" data-sm-acc="' + esc(a.id) + '" aria-pressed="' + (SM.acc === a.id) + '">' + svg(accIcon(a), 14, 2) + esc(a.name) + ' · ' + (isCredit(a) ? 'disp. ' + money(Math.max((a.limit || 0) - Math.max(-bal, 0), 0)) : money(bal)) + '</button>'; }).join('') + '</div></div>';
+}
+function paintSh() {
+  var el = $('shModal'); if (!el) return;
+  if (!SM) { el.innerHTML = ''; return; }
+  var sh = shById(selSh), me = uidNow(), title, body = '', btn, amountField = true;
+  var own = S.accounts.filter(function (a) { return !isCredit(a); });
+  if (SM.kind === 'crear') {
+    title = 'Nueva cuenta compartida'; btn = 'Crear cuenta compartida'; amountField = false;
+    body = '<div><label class="lab" for="smName">Nombre</label><input class="field" id="smName" maxlength="28" placeholder="Gastos de la casa" value="' + esc(SM.smName || '') + '"></div>' +
+      '<div><span class="lab">Cómo se reparten los gastos</span><div style="display:flex;flex-direction:column;gap:8px">' + Object.keys(SH_MODES).map(function (k) { return '<button type="button" class="opt" data-sm-mode="' + k + '" aria-pressed="' + (SM.mode === k) + '"><span class="dot"></span><span><b>' + SH_MODES[k].name + '</b><span class="s">' + SH_MODES[k].s + '</span></span></button>'; }).join('') + '</div></div>' +
+      '<p class="hint" style="margin:0">Después de crearla te damos un código para invitar a la otra persona.</p>';
+  } else if (SM.kind === 'unirse') {
+    title = 'Unirme a una cuenta'; amountField = false; btn = SM.invite ? 'Unirme' : 'Buscar';
+    body = '<div><label class="lab" for="smCode">Código de invitación</label><input class="field" id="smCode" maxlength="8" autocomplete="off" autocapitalize="characters" placeholder="K7Q-4MX" value="' + esc(SM.smCode || '') + '" style="height:56px;font-size:22px;font-weight:800;letter-spacing:.16em;text-align:center;text-transform:uppercase"></div>' +
+      (SM.invite ? '<div class="card" style="background:var(--surface);display:flex;flex-direction:column;gap:8px;text-align:center;align-items:center"><span class="ico" style="width:48px;height:48px;border-radius:16px;background:var(--green-soft);color:var(--green)">' + svg('ti-users', 24) + '</span><b style="font-size:17px">' + esc(SM.invite.byName || 'Alguien') + ' te invitó a “' + esc(SM.invite.name || 'Cuenta compartida') + '”</b><span class="sub" style="font-size:13px;line-height:1.45">Los dos verán y registrarán los movimientos de esa cuenta. Nadie verá tus otras cuentas ni tus gastos personales.</span></div>' : '<p class="hint" style="margin:0">Pídele el código a quien creó la cuenta. Necesitas internet para unirte.</p>');
+  } else if (SM.kind === 'aporte') {
+    title = 'Poner aporte'; btn = 'Poner aporte';
+    body = smAccChips('Sale de tu cuenta', own) + '<p class="hint" style="margin:-6px 0 0">El aporte pasa al fondo de “' + esc(sh.name) + '” y cuenta como lo que pusiste.</p>';
+  } else if (SM.kind === 'gasto') {
+    title = 'Nuevo gasto compartido'; btn = 'Guardar gasto';
+    var amt = num(SM.smAmount || SM.amount || 0) || 0;
+    body = '<div><label class="lab" for="smDesc">Descripción</label><input class="field" id="smDesc" maxlength="40" placeholder="Tottus Parra" value="' + esc(SM.smDesc || '') + '"></div>' +
+      '<div><span class="lab">Categoría</span><div class="chips">' + S.cats.map(function (c) { return '<button type="button" class="chip" data-sm-cat="' + esc(c.id) + '" aria-pressed="' + (SM.cat === c.id) + '"><i style="width:8px;height:8px;border-radius:4px;background:' + C(c.color).dot + '"></i>' + esc(c.name) + '</button>'; }).join('') + '</div></div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px"><span class="lab" style="margin:0">¿Con qué se pagó?</span>' +
+      '<button type="button" class="opt" data-sm-paid="fondo" aria-pressed="' + (SM.paid === 'fondo') + '"><span class="dot"></span><span><b>Con el fondo común</b><span class="s">Sale del saldo compartido (hay ' + money(shFund(sh)) + ')</span></span></button>' +
+      '<button type="button" class="opt" data-sm-paid="propia" aria-pressed="' + (SM.paid === 'propia') + '"><span class="dot"></span><span><b>Lo pagué yo con mi plata</b><span class="s">Sale de tu cuenta' + (sh.meta.mode === 'fondo' ? '' : ' y los demás te deben su parte') + '</span></span></button></div>' +
+      (SM.paid === 'propia' ? smAccChips('¿Con qué cuenta?', S.accounts) : '') +
+      (sh.meta.mode === 'fondo' ? '' : '<div class="card" style="padding:12px 14px;background:var(--surface)"><span class="lab">Cómo se divide · ' + SH_MODES[sh.meta.mode].name.toLowerCase() + '</span>' + sh.members.map(function (m) { return '<div style="display:flex;align-items:center;gap:10px;padding:4px 0">' + shAv(sh, m.uid, 26) + '<span style="flex:1;font-size:14px">' + esc(shWho(sh, m.uid)) + '</span><b style="font-size:14px">' + money(round2(amt * shShareNow(sh, m.uid))) + '</b></div>'; }).join('') + '</div>');
+  } else {
+    title = 'Pagar a ' + shMember(sh, SM.to).name; btn = 'Registrar pago';
+    body = smAccChips('¿Desde qué cuenta le pagas?', own) + '<p class="hint" style="margin:-6px 0 0">Se descuenta de tu cuenta y le llega a ' + esc(shMember(sh, SM.to).name) + ' en su app. El fondo común no cambia.</p>';
+  }
+  el.innerHTML = '<div class="scrim on" data-sm-scrim><form class="sheet" id="smForm" novalidate role="dialog" aria-modal="true" aria-labelledby="smTitle">' +
+    '<div class="row-between" style="align-items:center"><h2 id="smTitle" style="margin:0;font-size:18px">' + title + '</h2><button type="button" class="btn btn-ghost iconbtn-round" data-sm-close aria-label="Cerrar">' + svg('<path d="M6 6l12 12M18 6 6 18"/>', 18, 2) + '</button></div>' +
+    (amountField ? '<label class="amount"><span class="cur">' + esc(S.settings.currency) + '</span><input id="smAmount" inputmode="decimal" placeholder="0.00" aria-label="Monto" autocomplete="off" value="' + esc(SM.smAmount != null ? SM.smAmount : (SM.amount != null ? SM.amount : '')) + '"></label>' : '') +
+    '<p class="err" id="smErr" role="alert">' + esc(SM.err || '') + '</p>' + body +
+    '<button type="submit" class="btn btn-primary" style="height:54px;font-size:16px;flex-shrink:0">' + btn + '</button></form></div>';
+}
+
+function smError(msg) { SM.err = msg; paintSh(); }
+function genCode() { var a = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', s = ''; for (var i = 0; i < 6; i++) s += a[Math.floor(Math.random() * a.length)]; return s; }
+function myMemberInfo() { var u = S.user || {}; return {name:(S.settings.name || (u.displayName || '').split(' ')[0] || 'Yo'), photo:u.photoURL || '', joined:Date.now()}; }
+function makeInvite(sid, name) {
+  var code = genCode(), now = Date.now(), exp = now + 7 * 86400000, u = {};
+  u['invites/' + code] = {sid:sid, by:uidNow(), byName:myMemberInfo().name, name:name, created:now, exp:exp};
+  u['shared/' + sid + '/meta/invite'] = {code:code, exp:exp};
+  return {code:code, upd:u};
+}
+function inviteLink(code) { return location.origin + location.pathname + '#unirse-' + code; }
+
+function submitSh() {
+  keepSh();
+  var me = uidNow(), sh = shById(selSh), now = Date.now(), today = todayISO();
+  if (SM.kind === 'crear') {
+    var name = (SM.smName || '').trim();
+    if (!name) return smError('Ponle un nombre a la cuenta compartida.');
+    var sid = globalId(), info = myMemberInfo(), u = {};
+    u['shared/' + sid + '/meta'] = {name:name, mode:SM.mode, createdBy:me, created:now};
+    u['shared/' + sid + '/members/' + me] = info;
+    u['billetera/' + me + '/shared/' + sid] = true;
+    commitAbs(u);
+    var inv = makeInvite(sid, name); commitAbs(inv.upd);
+    selSh = sid; closeSh(); render();
+    toast('Cuenta creada. Comparte el código ' + fmtCode(inv.code));
+    return;
+  }
+  if (SM.kind === 'unirse') {
+    var code = (SM.smCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length !== 6) return smError('El código tiene 6 letras y números, por ejemplo K7Q-4MX.');
+    if (!SM.invite || SM.invite.code !== code) {
+      if (navigator.onLine === false) return smError('Necesitas internet para unirte.');
+      SM.err = 'Buscando…'; paintSh();
+      db.ref('invites/' + code).once('value').then(function (snap) {
+        var v = snap.val();
+        if (!SM) return;
+        if (!v) return smError('No encontramos ese código. Revísalo con quien te lo mandó.');
+        if (v.exp && v.exp < Date.now()) return smError('Ese código ya venció. Pide uno nuevo.');
+        if ((S.shareds || []).some(function (x) { return x.id === v.sid; })) return smError('Ya eres parte de “' + (v.name || 'esa cuenta') + '”.');
+        SM.invite = Object.assign({code:code}, v); SM.err = ''; paintSh();
+      }).catch(function (e) { if (SM) smError('No se pudo buscar el código (' + (e.code || e.message) + ').'); });
+      return;
+    }
+    var info2 = myMemberInfo(), u2 = {}; info2.code = code;
+    u2['shared/' + SM.invite.sid + '/members/' + me] = info2;
+    u2['billetera/' + me + '/shared/' + SM.invite.sid] = true;
+    var joinedName = SM.invite.name; selSh = SM.invite.sid;
+    commitAbs(u2); closeSh(); location.hash = 'compartida';
+    toast('Te uniste a “' + (joinedName || 'la cuenta compartida') + '”');
+    return;
+  }
+  var n = num(SM.smAmount);
+  if (!isFinite(n) || n <= 0) return smError('Escribe un monto mayor que cero.');
+  if (!sh) return smError('No se encontró la cuenta compartida.');
+  var a = acc(SM.acc), bal = balances()[SM.acc];
+  var needsAcc = SM.kind !== 'gasto' || SM.paid === 'propia';
+  if (needsAcc) {
+    if (!S.accounts.some(function (x) { return x.id === SM.acc; })) return smError('Elige una cuenta.');
+    if (isCredit(a)) { var avail = Math.max((a.limit || 0) - Math.max(-bal, 0), 0); if (n > avail + 0.001) return smError('Supera el crédito disponible de ' + a.name + ' (' + money(avail) + ').'); }
+    else if (n > bal + 0.001) return smError('Tu ' + a.name + ' solo tiene ' + money(Math.max(bal, 0)) + '.');
+  }
+  var mid = globalId(), ptx = needsAcc ? globalId() : null, upd = {}, mov = {by:me, amount:n, date:today, created:now};
+  if (SM.kind === 'aporte') {
+    mov.type = 'aporte'; mov.accName = a.name; mov.ptx = ptx;
+    upd['billetera/' + me + '/tx/' + ptx] = {date:today, desc:'Aporte a ' + sh.name, cat:'shared', acc:a.id, amount:-n, created:now, shared:sh.id, smov:mid};
+  } else if (SM.kind === 'gasto') {
+    var c = cat(SM.cat), desc = (SM.smDesc || '').trim() || c.name;
+    if (SM.paid === 'fondo' && n > shFund(sh) + 0.001) return smError('El fondo solo tiene ' + money(shFund(sh)) + '. Paga con tu plata o pongan un aporte.');
+    mov.type = 'gasto'; mov.desc = desc; mov.cat = {name:c.name, icon:c.icon, color:c.color}; mov.paid = SM.paid;
+    if (ptx) { mov.accName = a.name; mov.ptx = ptx; upd['billetera/' + me + '/tx/' + ptx] = {date:today, desc:desc + ' · ' + sh.name, cat:'shared', acc:a.id, amount:-n, created:now, shared:sh.id, smov:mid}; }
+  } else {
+    mov.type = 'saldo'; mov.to = SM.to; mov.accName = a.name; mov.ptx = ptx;
+    upd['billetera/' + me + '/tx/' + ptx] = {date:today, desc:'Pago a ' + shMember(sh, SM.to).name + ' · ' + sh.name, cat:'shared', acc:a.id, amount:-n, created:now, shared:sh.id, smov:mid};
+  }
+  upd['shared/' + sh.id + '/movs/' + mid] = mov;
+  var kind = SM.kind; closeSh(); commitAbs(upd);
+  toast(kind === 'aporte' ? 'Aporte de ' + money(n) + ' al fondo' : kind === 'gasto' ? 'Gasto compartido guardado' : 'Pago de ' + money(n) + ' registrado');
+}
+
+function shClick(t, d) {
+  var me = uidNow();
+  if (d.openShared) { selSh = d.openShared; if (current() !== 'compartida') location.hash = 'compartida'; else render(); return true; }
+  if (d.shOpen) { if ((d.shOpen === 'aporte' || d.shOpen === 'gasto') && !S.accounts.length) { toast('Primero crea una cuenta en Configuración'); return true; } openSh(d.shOpen); return true; }
+  if (t.hasAttribute('data-sm-close')) { closeSh(); return true; }
+  if (d.smAcc) { keepSh(); SM.acc = d.smAcc; paintSh(); return true; }
+  if (d.smCat) { keepSh(); SM.cat = d.smCat; paintSh(); return true; }
+  if (d.smPaid) { keepSh(); SM.paid = d.smPaid; if (d.smPaid === 'propia' && !SM.acc) SM.acc = S.accounts[0] && S.accounts[0].id; paintSh(); return true; }
+  if (d.smMode) { keepSh(); SM.mode = d.smMode; paintSh(); return true; }
+  if (d.shSettle) { var p = d.shSettle.split('|'); openSh('saldo', {to:p[0], amount:(+p[1]).toFixed(2), smAmount:(+p[1]).toFixed(2)}); return true; }
+  if (d.shDel) {
+    var sh = shById(selSh), m = sh && sh.movs.filter(function (x) { return x.id === d.shDel; })[0]; if (!m || m.by !== me) return true;
+    var u = {}; u['shared/' + sh.id + '/movs/' + m.id] = null; if (m.ptx) u['billetera/' + me + '/tx/' + m.ptx] = null;
+    commitAbs(u); toast('Borrado'); return true;
+  }
+  if (d.shMode) { var q = d.shMode.split('|'), s2 = shById(q[0]); var u2 = {}; u2['shared/' + q[0] + '/meta/mode'] = q[1];
+    if (q[1] === 'porcentaje' && s2 && !(s2.meta.pct && s2.members.every(function (x) { return s2.meta.pct[x.uid] != null; }))) { var eq = {}, base = Math.floor(100 / s2.members.length / 5) * 5; s2.members.forEach(function (x, i) { eq[x.uid] = base + (i === 0 ? 100 - base * s2.members.length : 0); }); u2['shared/' + q[0] + '/meta/pct'] = eq; }
+    commitAbs(u2); toast('Reparto: ' + SH_MODES[q[1]].name); return true; }
+  if (d.shInvite) { var s3 = shById(d.shInvite); if (!s3) return true; var inv = makeInvite(s3.id, s3.name); commitAbs(inv.upd); toast('Código nuevo: ' + fmtCode(inv.code)); return true; }
+  if (d.shCopy) { var link = inviteLink(d.shCopy), txt = 'Únete a mi cuenta compartida en My Wallet con el código ' + fmtCode(d.shCopy) + ': ' + link;
+    try { navigator.clipboard.writeText(txt).then(function () { toast('Enlace copiado'); }, function () { toast('Código: ' + fmtCode(d.shCopy)); }); } catch (e) { toast('Código: ' + fmtCode(d.shCopy)); } return true; }
+  if (d.shSharelink) { var z = d.shSharelink.split('|'), msg = 'Únete a “' + z[1] + '” en My Wallet con el código ' + fmtCode(z[0]) + ': ' + inviteLink(z[0]);
+    if (navigator.share) navigator.share({title:'My Wallet', text:msg}).catch(function () {}); else { try { navigator.clipboard.writeText(msg).then(function () { toast('Mensaje copiado, pégalo en WhatsApp'); }); } catch (e) { toast('Código: ' + fmtCode(z[0])); } } return true; }
+  if (d.shRemove) { var r = d.shRemove.split('|'), s4 = shById(r[0]); if (!s4) return true; var bal = shBalances(s4).diff[r[1]] || 0;
+    if (Math.abs(bal) > 0.004 && s4.meta.mode !== 'fondo') { toast('Primero tienen que quedar parejos con ' + shMember(s4, r[1]).name); return true; }
+    if (confirmShAction !== d.shRemove) { confirmShAction = d.shRemove; toast('Toca "Quitar" otra vez para confirmar'); setTimeout(function () { confirmShAction = null; }, 5000); return true; }
+    confirmShAction = null; var u3 = {}; u3['shared/' + r[0] + '/members/' + r[1]] = null; commitAbs(u3); toast(shMember(s4, r[1]).name + ' ya no es parte de la cuenta'); return true; }
+  if (d.shLeave) { var s5 = shById(d.shLeave); if (!s5) return true; var b5 = shBalances(s5).diff[me] || 0;
+    if (b5 < -0.004 && s5.meta.mode !== 'fondo') { toast('Primero paga lo que debes (' + money(-b5) + ')'); return true; }
+    if (confirmShAction !== 'leave' + d.shLeave) { confirmShAction = 'leave' + d.shLeave; toast('Toca "Salir" otra vez para confirmar'); setTimeout(function () { confirmShAction = null; }, 5000); return true; }
+    confirmShAction = null; var u4 = {}; u4['shared/' + d.shLeave + '/members/' + me] = null; u4['billetera/' + me + '/shared/' + d.shLeave] = null;
+    if (shRefs[d.shLeave]) { shRefs[d.shLeave].off(); delete shRefs[d.shLeave]; }
+    commitAbs(u4); delete SHARED[d.shLeave]; saveShared(); refreshFromLocal(); toast('Saliste de “' + s5.name + '”'); return true; }
+  if (d.shDelete) { var s6 = shById(d.shDelete); if (!s6) return true;
+    if (confirmShAction !== 'del' + d.shDelete) { confirmShAction = 'del' + d.shDelete; toast('Se borrará para todos. Toca otra vez para confirmar'); setTimeout(function () { confirmShAction = null; }, 5000); return true; }
+    confirmShAction = null; if (shRefs[d.shDelete]) { shRefs[d.shDelete].off(); delete shRefs[d.shDelete]; }
+    var u5 = {}; u5['shared/' + d.shDelete] = null; u5['billetera/' + me + '/shared/' + d.shDelete] = null; if (s6.meta.invite && s6.meta.invite.code) u5['invites/' + s6.meta.invite.code] = null;
+    commitAbs(u5); toast('Cuenta compartida eliminada'); return true; }
+  return false;
+}
+var confirmShAction = null;
+
 var darkMQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 function themePref() { if (S.user && S.settings.theme) return S.settings.theme; try { return localStorage.getItem('mw-theme') || 'auto'; } catch (e) { return 'auto'; } }
 function applyTheme() {
@@ -897,7 +1331,7 @@ function render() {
   if (!S.user || $('app').hidden) return;
   applyAccent(); renderNav();
   var v = current();
-  var html = SUBVIEWS[v] ? viewCfgList(v) : v === 'movimientos' ? viewMovimientos() : v === 'billetera' ? viewCuentas() : v === 'presupuesto' ? viewPresupuesto() : v === 'estadisticas' ? viewEstadisticas() : v === 'personalizar' ? viewPersonalizar() : viewInicio();
+  var html = v === 'compartida' ? viewCompartida() : v === 'cfg-compartidas' ? viewCfgCompartidas() : SUBVIEWS[v] ? viewCfgList(v) : v === 'movimientos' ? viewMovimientos() : v === 'billetera' ? viewCuentas() : v === 'presupuesto' ? viewPresupuesto() : v === 'estadisticas' ? viewEstadisticas() : v === 'personalizar' ? viewPersonalizar() : viewInicio();
   var active = document.activeElement && document.activeElement.id;
   $('view').innerHTML = html;
   var h1 = document.querySelector('#view .top h1');
@@ -907,6 +1341,7 @@ function render() {
     q.addEventListener('input', function () { query = q.value; var pos = q.selectionStart; render(); var n = $('q'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } });
     if (active === 'q') { q.focus(); }
   }
+  if (pendingJoinCode && S.user) { var jc = pendingJoinCode; pendingJoinCode = null; setTimeout(function () { openSh('unirse', {smCode:fmtCode(jc)}); }, 50); }
   var sn = $('sName');
   if (sn) sn.addEventListener('change', function () { put('settings/name', sn.value.trim()); toast('Nombre guardado'); });
 }
@@ -1266,8 +1701,10 @@ $('billDelete').addEventListener('click', function () { closeSheet('billScrim');
 /* Clics                                                               */
 /* ------------------------------------------------------------------ */
 document.addEventListener('click', function (e) {
+  if (e.target.hasAttribute && e.target.hasAttribute('data-sm-scrim')) { closeSh(); return; }
   var t = e.target.closest('button, a'); if (!t) return;
   var d = t.dataset;
+  if (shClick(t, d)) return;
   if (t.hasAttribute('data-open-add')) { if (!S.accounts.length) { toast('Primero crea una cuenta en Configuración'); location.hash = 'personalizar'; return; } if (!S.cats.length) { toast('Primero crea una categoría en Configuración'); location.hash = 'personalizar'; return; } openTx(); return; }
   if (d.close) { closeSheet(d.close); return; }
   if (t.hasAttribute('data-open-acc')) { openAcc(); return; }
@@ -1339,6 +1776,25 @@ document.addEventListener('input', function (e) {
   var k = e.target && e.target.getAttribute && e.target.getAttribute('data-iconq');
   if (k) { iconQuery[k] = e.target.value; repaintIcons(k); }
 });
+document.addEventListener('submit', function (e) { if (e.target.id === 'smForm') { e.preventDefault(); submitSh(); } });
+document.addEventListener('input', function (e) {
+  if (e.target.id === 'smAmount' && SM && SM.kind === 'gasto') { var pos = e.target.selectionStart; keepSh(); paintSh(); var a = $('smAmount'); if (a) { a.focus(); try { a.setSelectionRange(pos, pos); } catch (er) {} } }
+  if (e.target.id === 'smCode' && SM && SM.invite) { SM.invite = null; keepSh(); paintSh(); var c = $('smCode'); if (c) c.focus(); }
+});
+document.addEventListener('change', function (e) {
+  var el = e.target, nm = el.getAttribute && el.getAttribute('data-sh-name'), pc = el.getAttribute && el.getAttribute('data-sh-pct');
+  if (nm) { var v = el.value.trim(); if (!v) { render(); return; } var u = {}; u['shared/' + nm + '/meta/name'] = v; commitAbs(u); toast('Nombre guardado'); }
+  if (pc) {
+    var p = pc.split('|'), sh = shById(p[0]); if (!sh) return;
+    var val = +el.value, pct = Object.assign({}, sh.meta.pct || {}); pct[p[1]] = val;
+    if (sh.members.length === 2) { var other = sh.members.filter(function (m) { return m.uid !== p[1]; })[0]; pct[other.uid] = 100 - val; }
+    var u2 = {}; u2['shared/' + p[0] + '/meta/pct'] = pct; commitAbs(u2);
+  }
+});
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && SM) closeSh(); });
+function checkJoinHash() { var h = (location.hash || '').slice(1); if (h.indexOf('unirse-') === 0) { pendingJoinCode = h.slice(7).toUpperCase(); location.hash = 'cfg-compartidas'; } }
+checkJoinHash();
+window.addEventListener('hashchange', checkJoinHash);
 document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && S.user && ref) { runAuto(); render(); } });
 window.addEventListener('hashchange', function () { if (current() !== 'inicio' && ['movimientos', 'presupuesto', 'estadisticas'].indexOf(current()) < 0) viewMonth = curYM(); render(); window.scrollTo(0, 0); });
 
