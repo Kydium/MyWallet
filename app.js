@@ -76,6 +76,9 @@ var TYPES = {
 };
 var INCOME = {id:'ingreso', name:'Ingreso', color:'verde', icon:'coins'};
 var TRANSFER = {id:'transfer', name:'Transferencia', color:'gris', icon:'wallet'};
+var GOAL_CAT = {id:'goal', name:'Meta de ahorro', color:'amarillo', icon:'star'};
+/* Transferencias, cuentas compartidas y metas no cuentan como gasto ni ingreso. */
+function noStat(t) { return t.cat === 'transfer' || t.cat === 'shared' || t.cat === 'goal'; }
 var P = {
   plus:'<path d="M12 5v14M5 12h14"/>', edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',
   warn:'<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/>', search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
@@ -145,7 +148,7 @@ function C(k) {
   return {soft: hexA(c.dot, .2), ink: mixHex(c.dot, '#ffffff', .35), dot: c.dot};
 }
 function tile(iconKey, colorKey, size, r) { var c = C(colorKey); return '<span class="ico" style="background:' + c.soft + ';color:' + c.ink + (size ? ';width:' + size + 'px;height:' + size + 'px' : '') + (r ? ';border-radius:' + r + 'px' : '') + '">' + svg(iconKey, size ? Math.round(size / 2) : 16, 2) + '</span>'; }
-function cat(id) { if (id === 'ingreso') return INCOME; if (id === 'transfer') return TRANSFER; if (id === 'shared') return SHARED_CAT; return S.cats.filter(function (c) { return c.id === id; })[0] || {id:id, name:'Sin categoría', color:'gris', icon:'dots', limit:0}; }
+function cat(id) { if (id === 'ingreso') return INCOME; if (id === 'transfer') return TRANSFER; if (id === 'shared') return SHARED_CAT; if (id === 'goal') return GOAL_CAT; return S.cats.filter(function (c) { return c.id === id; })[0] || {id:id, name:'Sin categoría', color:'gris', icon:'dots', limit:0}; }
 function acc(id) { return S.accounts.filter(function (a) { return a.id === id; })[0] || {id:id, name:'Cuenta eliminada', type:'efectivo', color:'gris', icon:'cash', initial:0}; }
 function accIcon(a) { return a.icon || (TYPES[a.type] || TYPES.efectivo).icon; }
 function isCredit(a) { return a.type === 'credito'; }
@@ -445,13 +448,13 @@ function balances() {
   return bal;
 }
 function monthExpense(m) {
-  return S.tx.reduce(function (s, t) { return t.date && t.date.slice(0, 7) === m && t.cat !== 'transfer' && t.cat !== 'shared' && t.amount < 0 ? s - t.amount : s; }, 0);
+  return S.tx.reduce(function (s, t) { return t.date && t.date.slice(0, 7) === m && !noStat(t) && t.amount < 0 ? s - t.amount : s; }, 0);
 }
 function stats(m) {
   var inc = 0, exp = 0, byCat = {};
   S.cats.forEach(function (c) { byCat[c.id] = 0; });
   S.tx.forEach(function (t) {
-    if (!t.date || t.date.slice(0, 7) !== m || t.cat === 'transfer' || t.cat === 'shared') return;
+    if (!t.date || t.date.slice(0, 7) !== m || noStat(t)) return;
     if (t.amount > 0) inc += t.amount; else { exp -= t.amount; byCat[t.cat] = (byCat[t.cat] || 0) - t.amount; }
   });
   var bal = balances(), cash = 0, debt = 0;
@@ -613,6 +616,11 @@ function txRow(t, withDay) {
     return '<div class="tx"><button class="rowbtn" data-open-shared="' + esc(t.shared || '') + '" aria-label="Ver la cuenta compartida"><span class="ic" style="background:' + sc.soft + ';color:' + sc.ink + '">' + svg(SHARED_CAT.icon, 20) + '</span>' +
       '<span class="t"><b>' + esc(t.desc) + '</b><span>Cuenta compartida · ' + esc(acc(t.acc).name) + (withDay ? ' · ' + shortDay(t.date) : '') + '</span></span><span class="amt" style="color:var(--muted)">' + signed(t.amount) + '</span></button></div>';
   }
+  if (t.cat === 'goal') {
+    var gl = S.goals.filter(function (x) { return x.id === t.goal; })[0], gc = C(gl ? (gl.color || 'amarillo') : 'amarillo');
+    return '<div class="tx"><button class="rowbtn" ' + (gl ? 'data-edit-goal="' + esc(gl.id) + '"' : 'data-edit-tx="' + esc(t.id) + '"') + ' aria-label="Ver la meta"><span class="ic" style="background:' + gc.soft + ';color:' + gc.ink + '">' + svg(gl ? (gl.icon || 'star') : 'star', 20) + '</span>' +
+      '<span class="t"><b>' + esc(t.desc) + '</b><span>Meta de ahorro · ' + esc(acc(t.acc).name) + (withDay ? ' · ' + shortDay(t.date) : '') + '</span></span><span class="amt" style="color:var(--muted)">' + signed(t.amount) + '</span></button></div>';
+  }
   var c = cat(t.cat), a = acc(t.acc), isT = t.cat === 'transfer';
   var meta = isT ? a.name + ' → ' + acc(t.to).name : c.name + ' · ' + a.name;
   var amt = isT ? '<span class="amt" style="color:var(--muted)">' + money(t.amount) + '</span>' : '<span class="amt" style="' + (t.amount > 0 ? 'color:var(--green)' : '') + '">' + signed(t.amount) + '</span>';
@@ -698,8 +706,8 @@ function viewMovimientos() {
   fCats = fCats.filter(function (id) { return S.cats.some(function (c) { return c.id === id; }); });
   var inMonth = S.tx.filter(function (t) { return t.date && t.date.slice(0, 7) === viewMonth; });
   var list = sortedTx(inMonth).filter(function (t) {
-    if (fKind === 'gastos' && !(t.amount < 0 && t.cat !== 'transfer' && t.cat !== 'shared')) return false;
-    if (fKind === 'ingresos' && !(t.amount > 0 && t.cat !== 'transfer' && t.cat !== 'shared')) return false;
+    if (fKind === 'gastos' && !(t.amount < 0 && !noStat(t))) return false;
+    if (fKind === 'ingresos' && !(t.amount > 0 && !noStat(t))) return false;
     if (fKind === 'transfer' && t.cat !== 'transfer') return false;
     if (fAccs.length && fAccs.indexOf(t.acc) < 0 && fAccs.indexOf(t.to) < 0) return false;
     if (fCats.length && fCats.indexOf(t.cat) < 0) return false;
@@ -720,7 +728,7 @@ function viewMovimientos() {
   var body;
   if (order.length) {
     body = order.map(function (d) {
-      var sum = groups[d].reduce(function (s, t) { return t.cat === 'transfer' || t.cat === 'shared' ? s : s + t.amount; }, 0);
+      var sum = groups[d].reduce(function (s, t) { return noStat(t) ? s : s + t.amount; }, 0);
       return '<div class="daylbl"><span>' + dayLabel(d) + '</span><span style="' + (sum > 0 ? 'color:var(--green)' : '') + '">' + (sum === 0 ? '' : signed(sum)) + '</span></div><div class="card" style="padding:0 16px">' + groups[d].map(function (t) { return txRow(t, false); }).join('') + '</div>';
     }).join('');
   } else if (inMonth.length) {
@@ -761,7 +769,7 @@ function viewPresupuesto() {
 
 function viewEstadisticas() {
   var s = stats(viewMonth), a0 = 0;
-  var mtx = S.tx.filter(function (t) { return t.date && t.date.slice(0, 7) === viewMonth && t.cat !== 'transfer' && t.cat !== 'shared'; });
+  var mtx = S.tx.filter(function (t) { return t.date && t.date.slice(0, 7) === viewMonth && !noStat(t); });
   var exps = mtx.filter(function (t) { return t.amount < 0; });
   var stops = s.exp ? S.cats.map(function (c) { var p = (s.byCat[c.id] || 0) / s.exp * 100; var a = a0; a0 += p; return C(c.color).dot + ' ' + a.toFixed(2) + '% ' + a0.toFixed(2) + '%'; }).join(',') : 'var(--empty) 0 100%';
   var saved = s.inc - s.exp, rate = s.inc ? Math.round(saved / s.inc * 100) : null;
@@ -786,7 +794,7 @@ function viewEstadisticas() {
   // Ingresos vs gastos, últimos 6 meses
   var six = [-5, -4, -3, -2, -1, 0].map(function (k) {
     var m = shiftMonth(viewMonth, k), inc = 0, exp = 0;
-    S.tx.forEach(function (t) { if (!t.date || t.date.slice(0, 7) !== m || t.cat === 'transfer' || t.cat === 'shared') return; if (t.amount > 0) inc += t.amount; else exp -= t.amount; });
+    S.tx.forEach(function (t) { if (!t.date || t.date.slice(0, 7) !== m || noStat(t)) return; if (t.amount > 0) inc += t.amount; else exp -= t.amount; });
     return {m:m, inc:inc, exp:exp};
   });
   var max6 = Math.max.apply(null, six.map(function (x) { return Math.max(x.inc, x.exp); })) || 1;
@@ -1614,10 +1622,19 @@ function paintGoal() {
   $('goalSave').textContent = G.editId ? 'Guardar cambios' : 'Crear meta';
   $('goalDelete').style.display = G.editId ? '' : 'none';
   $('gAddWrap').style.display = G.editId ? '' : 'none';
+  paintGoalAcc();
+}
+function paintGoalAcc() {
+  var v = $('gAdd').value.trim() ? num($('gAdd').value) : 0, out = v < 0, bals = balances();
+  $('gAccLab').textContent = out ? '¿A qué cuenta vuelve la plata?' : '¿De qué cuenta sale?';
+  $('gAccChips').innerHTML = S.accounts.filter(function (a) { return !isCredit(a); }).map(function (a) {
+    return '<button type="button" class="chip" data-gacc="' + esc(a.id) + '" aria-pressed="' + (G.acc === a.id) + '">' + svg(accIcon(a), 14, 2) + esc(a.name) + ' · ' + money(bals[a.id] || 0) + '</button>';
+  }).join('') + '<button type="button" class="chip" data-gacc="" aria-pressed="' + (!G.acc) + '">Ninguna, solo anotar</button>';
 }
 function openGoal(editId) {
   var g = editId ? S.goals.filter(function (x) { return x.id === editId; })[0] : null;
-  G = {editId: g ? g.id : null, icon: g ? (g.icon || 'star') : 'plane', color: g ? (g.color || 'verde') : 'turquesa', order: g ? g.order : nextOrder(S.goals)};
+  var firstAcc = S.accounts.filter(function (a) { return !isCredit(a); })[0];
+  G = {editId: g ? g.id : null, icon: g ? (g.icon || 'star') : 'plane', color: g ? (g.color || 'verde') : 'turquesa', order: g ? g.order : nextOrder(S.goals), acc: G && G.acc !== undefined && acc(G.acc).id === G.acc ? G.acc : (firstAcc ? firstAcc.id : '')};
   $('gName').value = g ? g.name : ''; $('gTarget').value = g ? g.target.toFixed(2) : ''; $('gSaved').value = g ? (g.saved || 0).toFixed(2) : ''; $('gAdd').value = '';
   $('gErr').textContent = '';
   iconQuery.goal = ''; $('gIconQ').value = '';
@@ -1632,9 +1649,13 @@ $('goalForm').addEventListener('submit', function (e) {
   if (!isFinite(saved) || saved < 0) { err.textContent = 'Lo ahorrado debe ser 0 o más.'; return; }
   if (!isFinite(add)) { err.textContent = 'Escribe un aporte válido.'; return; }
   var id = G.editId || newId(), wasEdit = !!G.editId;
+  var newSaved = round2(Math.max(saved + add, 0)), moved = round2(newSaved - saved);
+  if (moved > 0 && G.acc) { var bal = balances()[G.acc] || 0; if (moved > bal + 0.004) { err.textContent = 'En ' + acc(G.acc).name + ' solo tienes ' + money(bal) + '.'; return; } }
   closeSheet('goalScrim');
-  put('goals/' + id, {name:name, target:target, saved:round2(Math.max(saved + add, 0)), icon:G.icon, color:G.color, order:G.order});
-  toast(add ? 'Aporte de ' + money(add) + ' sumado' : wasEdit ? 'Meta actualizada' : 'Meta creada: ' + name);
+  var upd = {}; upd['goals/' + id] = {name:name, target:target, saved:newSaved, icon:G.icon, color:G.color, order:G.order};
+  if (moved && G.acc) upd['tx/' + newId()] = {date:todayISO(), desc:(moved > 0 ? 'Aporte a ' : 'Retiro de ') + name, cat:'goal', goal:id, acc:G.acc, amount:-moved, created:Date.now()};
+  patch(upd);
+  toast(moved > 0 ? 'Aporte de ' + money(moved) + ' sumado' + (G.acc ? ' desde ' + acc(G.acc).name : '') : moved < 0 ? money(-moved) + ' sacados de la meta' + (G.acc ? ' a ' + acc(G.acc).name : '') : wasEdit ? 'Meta actualizada' : 'Meta creada: ' + name);
 });
 $('goalDelete').addEventListener('click', function () { closeSheet('goalScrim'); del('goals/' + G.editId); toast('Meta eliminada'); });
 
@@ -1715,6 +1736,7 @@ document.addEventListener('click', function (e) {
   if (d.editAcc) { openAcc(d.editAcc); return; }
   if (d.editCat) { openCat(d.editCat); return; }
   if (d.editGoal) { openGoal(d.editGoal); return; }
+  if (d.gacc !== undefined) { G.acc = d.gacc; paintGoalAcc(); return; }
   if (d.editBill) { openBill(d.editBill); return; }
   if (d.ttype) { F.type = d.ttype; paintTx(); return; }
   if (d.cat) { F.cat = d.cat; paintTx(); return; }
@@ -1769,6 +1791,7 @@ $('aName').addEventListener('input', function () { $('aErr').textContent = ''; p
 $('cName').addEventListener('input', function () { $('cErr').textContent = ''; paintCat(); });
 $('cLimit').addEventListener('input', function () { $('cErr').textContent = ''; });
 $('gName').addEventListener('input', function () { $('gErr').textContent = ''; paintGoal(); });
+$('gAdd').addEventListener('input', function () { $('gErr').textContent = ''; paintGoalAcc(); });
 ['gTarget', 'gSaved', 'gAdd'].forEach(function (id) { $(id).addEventListener('input', function () { $('gErr').textContent = ''; }); });
 ['bName', 'bAmount', 'bDay', 'bDate'].forEach(function (id) { $(id).addEventListener('input', function () { $('bErr').textContent = ''; }); });
 

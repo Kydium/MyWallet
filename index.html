@@ -365,7 +365,8 @@ html[data-theme="dark"] .balance{border:1px solid #2E333B}
       <div><label class="lab" for="gTarget">Meta</label><input class="field" id="gTarget" inputmode="decimal" placeholder="3,500.00"></div>
       <div><label class="lab" for="gSaved">Ya ahorrado</label><input class="field" id="gSaved" inputmode="decimal" placeholder="0.00"></div>
     </div>
-    <div id="gAddWrap"><label class="lab" for="gAdd">Sumar un aporte</label><input class="field" id="gAdd" inputmode="decimal" placeholder="Ej. 100"><p class="hint">Se suma a lo que ya llevas ahorrado.</p></div>
+    <div id="gAddWrap"><label class="lab" for="gAdd">Sumar un aporte</label><input class="field" id="gAdd" inputmode="decimal" placeholder="Ej. 100"><p class="hint">Se suma a lo que ya llevas ahorrado. Para sacar plata de la meta, escríbelo en negativo (ej. -50).</p>
+      <span class="lab" style="margin-top:12px;display:block" id="gAccLab">¿De qué cuenta sale?</span><div class="chips" id="gAccChips"></div></div>
     <div><span class="lab">Ícono</span><input class="field" type="search" data-iconq="goal" id="gIconQ" placeholder="Buscar: perro, pizza, auto, gimnasio…" aria-label="Buscar ícono" style="margin-bottom:8px"><div class="icongrid" id="goalIcons"></div></div>
     <div><span class="lab">Color</span><div class="swatches" id="goalColors"></div></div>
     <p class="err" id="gErr" role="alert"></p>
@@ -409,6 +410,6 @@ html[data-theme="dark"] .balance{border:1px solid #2E333B}
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-database-compat.js"></script>
 <script src="firebase-config.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
