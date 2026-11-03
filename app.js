@@ -618,7 +618,7 @@ function txRow(t, withDay) {
   }
   if (t.cat === 'goal') {
     var gl = S.goals.filter(function (x) { return x.id === t.goal; })[0], gc = C(gl ? (gl.color || 'amarillo') : 'amarillo');
-    return '<div class="tx"><button class="rowbtn" ' + (gl ? 'data-edit-goal="' + esc(gl.id) + '"' : 'data-edit-tx="' + esc(t.id) + '"') + ' aria-label="Ver la meta"><span class="ic" style="background:' + gc.soft + ';color:' + gc.ink + '">' + svg(gl ? (gl.icon || 'star') : 'star', 20) + '</span>' +
+    return '<div class="tx"><button class="rowbtn" ' + (gl && t.amount > 0 ? 'data-edit-goal="' + esc(gl.id) + '"' : 'data-edit-tx="' + esc(t.id) + '"') + ' aria-label="Ver la meta"><span class="ic" style="background:' + gc.soft + ';color:' + gc.ink + '">' + svg(gl ? (gl.icon || 'star') : 'star', 20) + '</span>' +
       '<span class="t"><b>' + esc(t.desc) + '</b><span>Meta de ahorro · ' + esc(acc(t.acc).name) + (withDay ? ' · ' + shortDay(t.date) : '') + '</span></span><span class="amt" style="color:var(--muted)">' + signed(t.amount) + '</span></button></div>';
   }
   var c = cat(t.cat), a = acc(t.acc), isT = t.cat === 'transfer';
@@ -1429,6 +1429,14 @@ function repaintIcons(gridKey) {
 /* Formulario: movimiento                                              */
 /* ------------------------------------------------------------------ */
 var F = {};
+function goalById(id) { return S.goals.filter(function (g) { return g.id === id; })[0] || null; }
+/* Al crear, editar o borrar un aporte a una meta, ajusta lo ahorrado en la meta. */
+function goalSavedDelta(upd, prev, next) {
+  var d = {};
+  if (prev && goalById(prev.id)) d[prev.id] = (d[prev.id] || 0) - prev.moved;
+  if (next) d[next.id] = (d[next.id] || 0) + next.moved;
+  Object.keys(d).forEach(function (gid) { var g = goalById(gid); if (g && Math.abs(d[gid]) > 0.004) upd['goals/' + gid + '/saved'] = round2(Math.max((g.saved || 0) + d[gid], 0)); });
+}
 function paintTx() {
   document.querySelectorAll('#typeSeg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.ttype === F.type)); });
   $('catBlock').style.display = F.type === 'gasto' ? '' : 'none';
@@ -1440,8 +1448,10 @@ function paintTx() {
   if (!fromList.some(function (a) { return a.id === F.acc; })) F.acc = fromList.length ? fromList[0].id : null;
   $('accChips').innerHTML = fromList.map(function (a) { return '<button type="button" class="chip" data-acc="' + esc(a.id) + '" aria-pressed="' + (a.id === F.acc) + '">' + svg(accIcon(a), 14, 2) + esc(a.name) + '</button>'; }).join('');
   var toList_ = S.accounts.filter(function (a) { return a.id !== F.acc; });
-  if (!toList_.some(function (a) { return a.id === F.to; })) F.to = toList_.length ? toList_[0].id : null;
-  $('toChips').innerHTML = toList_.length ? toList_.map(function (a) { return '<button type="button" class="chip" data-to="' + esc(a.id) + '" aria-pressed="' + (a.id === F.to) + '">' + svg(accIcon(a), 14, 2) + esc(a.name) + '</button>'; }).join('') : '<span class="sub" style="font-size:13px">Necesitas al menos dos cuentas para transferir.</span>';
+  var goalTo = S.goals.map(function (g) { return 'goal:' + g.id; });
+  if (!toList_.some(function (a) { return a.id === F.to; }) && goalTo.indexOf(F.to) < 0) F.to = toList_.length ? toList_[0].id : (goalTo[0] || null);
+  $('toChips').innerHTML = (toList_.length || S.goals.length) ? toList_.map(function (a) { return '<button type="button" class="chip" data-to="' + esc(a.id) + '" aria-pressed="' + (a.id === F.to) + '">' + svg(accIcon(a), 14, 2) + esc(a.name) + '</button>'; }).join('') +
+    S.goals.map(function (g) { var gc = C(g.color || 'verde'); return '<button type="button" class="chip" data-to="goal:' + esc(g.id) + '" aria-pressed="' + ('goal:' + g.id === F.to) + '"><span style="color:' + gc.ink + ';display:inline-flex">' + svg(g.icon || 'star', 14, 2) + '</span>Meta: ' + esc(g.name) + '</button>'; }).join('') : '<span class="sub" style="font-size:13px">Necesitas otra cuenta o una meta para transferir.</span>';
   var word = F.type === 'gasto' ? 'gasto' : F.type === 'ingreso' ? 'ingreso' : 'transferencia';
   $('saveBtn').textContent = F.editId ? 'Guardar cambios' : 'Guardar ' + word;
   $('txTitle').textContent = F.editId ? 'Editar movimiento' : 'Nuevo movimiento';
@@ -1453,9 +1463,9 @@ function openTx(o) {
   var e = o.edit;
   var lastAcc = S.accounts.filter(function (a) { return !isCredit(a); })[0];
   F = { editId: e ? e.id : null, billId: o.billId || null, billOcc: o.billOcc || null,
-        type: e ? (e.cat === 'transfer' ? 'transfer' : e.amount > 0 ? 'ingreso' : 'gasto') : (o.type || 'gasto'),
-        cat: e && e.cat !== 'transfer' && e.cat !== 'ingreso' ? e.cat : (o.cat || (S.cats[0] && S.cats[0].id)),
-        acc: e ? e.acc : (o.from || (lastAcc && lastAcc.id)), to: e && e.to ? e.to : (o.to || null), created: e ? e.created : null };
+        type: e ? (e.cat === 'transfer' || e.cat === 'goal' ? 'transfer' : e.amount > 0 ? 'ingreso' : 'gasto') : (o.type || 'gasto'),
+        cat: e && e.cat !== 'transfer' && e.cat !== 'ingreso' && e.cat !== 'goal' ? e.cat : (o.cat || (S.cats[0] && S.cats[0].id)),
+        acc: e ? e.acc : (o.from || (lastAcc && lastAcc.id)), to: e && e.cat === 'goal' ? 'goal:' + e.goal : e && e.to ? e.to : (o.to || null), prevGoal: e && e.cat === 'goal' ? {id:e.goal, moved:-e.amount} : null, created: e ? e.created : null };
   $('fAmount').value = e ? Math.abs(e.amount).toFixed(2) : (o.amount ? o.amount.toFixed(2) : '');
   $('fDesc').value = e ? e.desc : (o.desc || '');
   $('fDate').value = e ? e.date : (o.date || todayISO());
@@ -1475,7 +1485,9 @@ $('txForm').addEventListener('submit', function (e) {
   var descIn = $('fDesc').value.trim();
   var id = F.editId || newId();
   var item = {date:date, acc:F.acc, created: F.created || Date.now()};
-  if (F.type === 'transfer') { item.cat = 'transfer'; item.to = F.to; item.amount = n; item.desc = descIn || ('A ' + acc(F.to).name); }
+  var toGoal = F.type === 'transfer' && /^goal:/.test(F.to || '') ? goalById(F.to.slice(5)) : null;
+  if (toGoal) { item.cat = 'goal'; item.goal = toGoal.id; item.amount = -n; item.desc = descIn || ('Aporte a ' + toGoal.name); }
+  else if (F.type === 'transfer') { item.cat = 'transfer'; item.to = F.to; item.amount = n; item.desc = descIn || ('A ' + acc(F.to).name); }
   else if (F.type === 'ingreso') { item.cat = 'ingreso'; item.amount = n; item.desc = descIn || 'Ingreso'; }
   else { item.cat = F.cat; item.amount = -n; item.desc = descIn || cat(F.cat).name; }
   if (F.type === 'gasto' && isCredit(acc(F.acc))) {
@@ -1484,6 +1496,7 @@ $('txForm').addEventListener('submit', function (e) {
     if (debt + n > (a.limit || 0) + 0.001) { err.textContent = 'Supera tu crédito disponible (' + money(Math.max((a.limit || 0) - debt, 0)) + ').'; return; }
   }
   var upd = {}; upd['tx/' + id] = clean(item);
+  goalSavedDelta(upd, F.prevGoal, toGoal ? {id:toGoal.id, moved:n} : null);
   if (F.billId && F.billOcc) upd['bills/' + F.billId + '/done/' + F.billOcc] = 'paid';
   var wasEdit = !!F.editId, type = F.type;
   closeSheet('txScrim');
@@ -1492,7 +1505,9 @@ $('txForm').addEventListener('submit', function (e) {
 });
 $('txDelete').addEventListener('click', function () {
   var old = S.tx.filter(function (x) { return x.id === F.editId; })[0];
-  closeSheet('txScrim'); del('tx/' + F.editId); if (old) toast('Eliminado: ' + old.desc);
+  closeSheet('txScrim');
+  var upd = {}; upd['tx/' + F.editId] = null; goalSavedDelta(upd, F.prevGoal, null); patch(upd);
+  if (old) toast('Eliminado: ' + old.desc + (F.prevGoal ? ' · se quitó de la meta' : ''));
 });
 
 /* ------------------------------------------------------------------ */
@@ -1515,6 +1530,11 @@ function paintAcc() {
   $('accSave').textContent = A.editId ? 'Guardar cambios' : 'Crear cuenta';
   $('accDelete').style.display = A.editId ? '' : 'none';
 }
+/* El ícono y el color solo se cambian desde Configuración. */
+function styleEditable(kind) {
+  var on = /^#cfg-/.test(location.hash);
+  [kind + 'Icons', kind + 'Colors'].forEach(function (id) { $(id).parentNode.style.display = on ? '' : 'none'; });
+}
 function openAcc(editId) {
   var a = editId ? acc(editId) : null, bal = a ? balances()[a.id] : 0;
   A = {editId: a ? a.id : null, type: a ? a.type : 'banco', icon: a ? accIcon(a) : 'bank', color: a ? a.color : 'azul', iconTouched: !!a, order: a ? a.order : nextOrder(S.accounts), created: a ? (a.created || null) : Date.now(), fromTx: $('txScrim').classList.contains('on')};
@@ -1526,7 +1546,7 @@ function openAcc(editId) {
   $('aPay').value = a && isCredit(a) ? a.payDay : '';
   $('aErr').textContent = '';
   iconQuery.acc = ''; $('aIconQ').value = '';
-  paintAcc(); openSheet('accScrim', 'aName');
+  styleEditable('acc'); paintAcc(); openSheet('accScrim', 'aName');
 }
 $('accForm').addEventListener('submit', function (e) {
   e.preventDefault();
@@ -1585,7 +1605,7 @@ function openCat(editId, fromTx) {
   $('cLimit').value = c && c.limit ? c.limit.toFixed(2) : '';
   $('cErr').textContent = '';
   iconQuery.cat = ''; $('cIconQ').value = '';
-  paintCat(); openSheet('catScrim', 'cName');
+  styleEditable('cat'); paintCat(); openSheet('catScrim', 'cName');
 }
 $('catForm').addEventListener('submit', function (e) {
   e.preventDefault();
@@ -1638,7 +1658,7 @@ function openGoal(editId) {
   $('gName').value = g ? g.name : ''; $('gTarget').value = g ? g.target.toFixed(2) : ''; $('gSaved').value = g ? (g.saved || 0).toFixed(2) : ''; $('gAdd').value = '';
   $('gErr').textContent = '';
   iconQuery.goal = ''; $('gIconQ').value = '';
-  paintGoal(); openSheet('goalScrim', g ? 'gAdd' : 'gName');
+  styleEditable('goal'); paintGoal(); openSheet('goalScrim', g ? 'gAdd' : 'gName');
 }
 $('goalForm').addEventListener('submit', function (e) {
   e.preventDefault();
